@@ -1530,7 +1530,7 @@ function freshState() {
     ach: {}, jpo: 0, seen: {},
     deco: {}, cards: {},
     daily: null, weekly: null, hist: [], rec: {},
-    tips: {}, tipsOff: false, autoOn: true,
+    tips: {}, tipsOff: false, autoOn: true, eco: false,
     runStart: Date.now(), cityStart: Date.now(), campusDone: false, t: Date.now(),
   };
 }
@@ -1562,7 +1562,7 @@ function sanitize(o) {
   if (!isObj(o)) return f;
   for (const k of ['money', 'run', 'total', 'best', 'bestGain', 'dip', 'promos', 'ects', 'obj', 'boost', 'jpo', 't', 'runStart', 'cityStart',
     'palmes', 'accreds', 'rush', 'coffee', 'chests', 'gems', 'dipDone']) if (isNum(o[k])) f[k] = Math.max(0, o[k]);
-  for (const k of ['muted', 'music', 'intro', 'tipsOff', 'autoOn', 'campusDone']) if (typeof o[k] === 'boolean') f[k] = o[k];
+  for (const k of ['muted', 'music', 'intro', 'tipsOff', 'autoOn', 'campusDone', 'eco']) if (typeof o[k] === 'boolean') f[k] = o[k];
   if (typeof o.pseudo === 'string') f.pseudo = o.pseudo.slice(0, 24);
   if (o.buy === 1 || o.buy === 10 || o.buy === 'max') f.buy = o.buy;
   if (isObj(o.ach)) for (const k in o.ach) if (isNum(o.ach[k])) f.ach[k] = o.ach[k];
@@ -1609,7 +1609,7 @@ function sanitize(o) {
       dipDone: f.dip, promos: f.promos, ects: Math.min(MAX_ECTS_REFUND, f.ects + oldTreeRefund(o.tree)), total: f.total, best: f.best, bestGain: f.bestGain,
       ach: f.ach, cards: f.cards, jpo: f.jpo, seen: f.seen, deco: { reims: f.deco.reims || [] }, daily: f.daily, weekly: f.weekly,
       hist: f.hist, rec: f.rec, tips: f.tips, tipsOff: f.tipsOff, muted: f.muted, music: f.music, intro: f.intro, pseudo: f.pseudo,
-      buy: f.buy, obj: 0, autoOn: f.autoOn,
+      buy: f.buy, obj: 0, autoOn: f.autoOn, eco: f.eco,
     };
     return { ...freshState(), ...kept, migrated: 'v5' };
   }
@@ -1830,16 +1830,37 @@ function clearDecision() {
 
 
 /* ===== js/render/canvas.js ===== */
-/** Canvas du jeu et taille de la fenêtre d'affichage. */
+/** Canvas du jeu, contexte de dessin courant et taille de la fenêtre d'affichage. */
 
 const canvas = document.getElementById('world');
-const ctx = canvas.getContext('2d');
+const screenCtx = canvas.getContext('2d');
+
+/**
+ * Contexte où dessinent toutes les primitives : l'écran, ou une tuile du décor pendant son rendu (drawInto).
+ * Réaffecté seulement par drawInto.
+ */
+let ctx = screenCtx;
+
+/** Dessine dans un autre contexte (tuile hors écran) le temps de `draw`. */
+function drawInto(target, draw) {
+  const previous = ctx;
+  ctx = target;
+  try { draw(); } finally { ctx = previous; }
+}
 
 /** Taille affichée (pixels CSS) et densité de pixels de l'écran. */
 const view = { w: 0, h: 0, dpr: 1 };
 
+/** Densité de pixels maximale utilisée (baissée par la qualité automatique, voir quality.js). */
+let pixelRatioCap = 2;
+function setPixelRatioCap(cap) {
+  if (cap === pixelRatioCap) return;
+  pixelRatioCap = cap;
+  resizeCanvas();
+}
+
 function resizeCanvas() {
-  view.dpr = Math.min(2, window.devicePixelRatio || 1);
+  view.dpr = Math.min(pixelRatioCap, window.devicePixelRatio || 1);
   view.w = canvas.clientWidth;
   view.h = canvas.clientHeight;
   canvas.width = Math.round(view.w * view.dpr);
@@ -2095,6 +2116,12 @@ function fitCamera() {
   camera.tx = camera.ty = null;
   clampCamera();
 }
+
+/**
+ * Position écran (pixels réels) de l'origine du monde, arrondie au pixel : le campus et les tuiles du décor
+ * (backdrop-tiles.js) sont ainsi alignés exactement.
+ */
+const worldOrigin = () => [Math.round(view.dpr * (view.w / 2 - camera.x * camera.z)), Math.round(view.dpr * (view.h / 2 - camera.y * camera.z))];
 
 /** Point écran (pixels CSS) → point du monde. */
 const screenToWorld = (sx, sy) => [(sx - view.w / 2) / camera.z + camera.x, (sy - view.h / 2) / camera.z + camera.y];
@@ -2461,7 +2488,7 @@ function moveToNextCity() {
 
 /** Champs conservés par l'accréditation nationale (tout le reste repart de zéro). */
 const KEPT_ON_ACCREDITATION = ['total', 'best', 'bestGain', 'promos', 'ach', 'jpo', 'seen', 'cards', 'gems', 'shop', 'chests',
-  'daily', 'weekly', 'hist', 'rec', 'tips', 'tipsOff', 'muted', 'music', 'intro', 'pseudo', 'buy', 'autoOn', 'obj'];
+  'daily', 'weekly', 'hist', 'rec', 'tips', 'tipsOff', 'muted', 'music', 'intro', 'pseudo', 'buy', 'autoOn', 'obj', 'eco'];
 
 /**
  * Accréditation nationale (2ᵉ niveau de prestige) : une fois Charleville labellisée, on repart de Reims
@@ -2488,8 +2515,8 @@ function finishTransition() {
 
 /** Nouvelle partie (garde seulement les réglages et le pseudo). */
 function resetGame() {
-  const { music, muted, pseudo } = state;
-  setState({ ...freshState(), intro: true, music, muted, pseudo });
+  const { music, muted, pseudo, eco } = state;
+  setState({ ...freshState(), intro: true, music, muted, pseudo, eco });
   restartScene();
   clearDecision();
   fitCamera();
@@ -4158,8 +4185,11 @@ function generateTrees(site) {
   return trees;
 }
 
+const VINE_SPOTS = [];
+for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) if (isVine(i, j)) VINE_SPOTS.push([i, j]);
+
 function drawVines() {
-  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) if (isVine(i, j)) {
+  for (const [i, j] of VINE_SPOTS) {
     const alongJ = i <= 1;
     for (let r = 0; r < 2; r++) for (let k = 0; k < 4; k++) {
       const u = (k + 0.5) / 4, v = 0.28 + r * 0.44, [x, y] = alongJ ? iso(i + v, j + u) : iso(i + u, j + v);
@@ -4168,8 +4198,12 @@ function drawVines() {
       ctx.fillStyle = rgb(mix([104,152,62], SNOW, world.snow * 0.6)); circle(x - 1, y - 6, 2.2);
       if (world.season === 'automne' && k % 2) { ctx.fillStyle = rgb([118,40,92]); circle(x + 2, y - 3, 1.4); }
     }
-    if (hasGrapes(i, j)) drawGrapes(i + 0.5, j + 0.5);
   }
+}
+
+/** Grappes des vendanges, sur les rangs de vigne. */
+function drawHarvest() {
+  for (const [i, j] of VINE_SPOTS) if (hasGrapes(i, j)) drawGrapes(i + 0.5, j + 0.5);
 }
 
 /** Grappe mûre à récolter pendant les vendanges (grosse et animée pour qu'on la voie). */
@@ -4349,11 +4383,15 @@ function drawPond() {
   ctx.fillStyle = rgb([226,208,170]); blob(20.95, 4.5, 1.75, 1.3); ctx.fill();
   ctx.fillStyle = windowColor(WATER, false, 1); blob(20.95, 4.5, 1.5, 1.08); ctx.fill();
   ctx.fillStyle = rgb([140,205,240]); blob(20.8, 4.35, 1.0, 0.6); ctx.fill();
+  for (const [a, b] of [[20.2, 4.9], [21.6, 3.9]]) { const [x, y] = iso(a, b); ctx.fillStyle = rgb([70,150,80]); ellipse(x, y, 5, 2.4); }
+}
+
+/** Ronds dans l'eau et canards de l'étang (animés, dessinés à chaque image). */
+function drawPondLife() {
   if (!REDUCED_MOTION) for (let k = 0; k < 2; k++) { // ronds dans l'eau
     const p = (world.t * 0.3 + k / 2) % 1, [x, y] = iso(21.2 - k * 0.6, 4.7 + k * 0.2);
     ctx.strokeStyle = `rgba(255,255,255,${0.6 * (1 - p)})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(x, y, 4 + p * 14, 2 + p * 7, 0, 0, Math.PI * 2); ctx.stroke();
   }
-  for (const [a, b] of [[20.2, 4.9], [21.6, 3.9]]) { const [x, y] = iso(a, b); ctx.fillStyle = rgb([70,150,80]); ellipse(x, y, 5, 2.4); }
   for (let k = 0; k < 2; k++) { // canards
     const a = world.t * 0.25 * (k ? -1 : 1) + k * 2, [x, y] = iso(20.95 + Math.cos(a) * 0.9, 4.5 + Math.sin(a) * 0.55);
     ctx.fillStyle = rgb(k ? [250,250,250] : [250,210,80]); ellipse(x, y - 2, 4, 2.4); circle(x + 3, y - 5, 2);
@@ -4372,7 +4410,11 @@ function drawFootballPitch() {
 }
 
 /** Sol du campus (le socle de l'île et la ville autour sont dessinés par backdrop.js). */
-function drawGround() {
+/**
+ * Sol fixe du campus (pavés, pelouses, parcelles, étang, terrain, vignes) : il est dessiné dans les tuiles du décor
+ * (backdrop-tiles.js) et redessiné quand groundVersion() change (bâtiment construit, changement de ville).
+ */
+function drawGroundStatic() {
   const grass1 = mix(GRASS1, SNOW, world.snow), grass2 = mix(GRASS2, SNOW, world.snow);
   fillTiles(grass1, (i, j, t) => t === T_GRASS && (i + j) % 2 === 0);
   fillTiles(grass2, (i, j, t) => t === T_GRASS && (i + j) % 2 === 1);
@@ -4405,6 +4447,15 @@ function drawGround() {
   ctx.strokeStyle = rgb(grass1, 0.78); ctx.lineWidth = 1.1; ctx.stroke();
   for (const [x, y, c] of FLOWERS) { ctx.fillStyle = rgb(c); circle(x, y, 1.5); }
   if (state.site === 'chalons') drawVines();
+}
+
+/** Ce qui change le sol fixe du campus : la ville affichée et les parcelles construites. */
+const groundVersion = () => state.site + '|' + currentDefs().map(d => (state.b[d.id].lvl > 0 ? 1 : 0)).join('');
+
+/** Sol animé, dessiné à chaque image par-dessus le sol fixe : étang, grappes, contours de sélection. */
+function drawGround() {
+  drawPondLife();
+  if (state.site === 'chalons') drawHarvest();
 
   // bâtiment montré par Plume : contour doré qui pulse
   const focus = highlight.focus && BY[highlight.focus];
@@ -4594,8 +4645,8 @@ function drawFlyingCritters() {
  * Ville décorative autour du campus : une couronne de RING cases avec boulevard, rues, maisons dans le style
  * de la ville, et un monument emblématique (cathédrale de Reims, Notre-Dame-en-Vaux, place Ducale).
  * Au-delà, la campagne (champs, vignes ou forêts) couvre tout ce que la caméra peut montrer.
- * Rien n'y est cliquable. Les éléments de l'arrière (i < 0 ou j < 0) sont dessinés avant le campus,
- * ceux de l'avant (i ≥ N ou j ≥ N) après : ils ne se chevauchent jamais avec la scène du campus.
+ * Rien n'y est cliquable et rien n'y bouge, sauf le tramway : le décor est dessiné une fois, par tuiles (backdrop-tiles.js).
+ * Les éléments de l'arrière (i < 0 ou j < 0) passent sous le campus, ceux de l'avant (i ≥ N ou j ≥ N) dessus (BACKDROP_LAYERS).
  */
 
 /** Largeur de la couronne de ville autour du campus, en cases. */
@@ -4619,7 +4670,7 @@ const onBoulevard = (i, j) => !inCampus(i, j) && i >= -1 && j >= -1 && i <= N &&
 /* ----- Génération d'une ville (une seule fois par ville) ----- */
 
 /**
- * @returns {{ground: Map<number, number[]>, back: object[], front: object[], lines: number[][][], water: number[][]}}
+ * @returns {{groundByColor: Map<number[], object[]>, water: number[][], under: object[], mid: object[], over: object[]}}
  */
 function generateTown(site) {
   const rnd = mulberry32({ reims: 51100, chalons: 51000, charle: 8000 }[site]);
@@ -4688,8 +4739,19 @@ function generateTown(site) {
     }
   }
 
+  // couches : l'arrière passe sous le campus ; l'avant passe dessus, en deux parts de chaque côté de la ligne du tramway
   const isBack = it => it.maxI <= 0 || it.maxJ <= 0 || (it.minI < 0 && it.minJ >= N) || (it.minJ < 0 && it.minI >= N);
-  return { ground, back: sortOnce(items.filter(isBack)), front: sortOnce(items.filter(it => !isBack(it))), water };
+  const front = items.filter(it => !isBack(it)), behindTram = it => it.maxJ <= N + 1.15;
+  const groundByColor = new Map();
+  for (const [k, c] of ground) {
+    const i = Math.floor(k / 100) + LO, j = (k % 100) + LO;
+    if (!groundByColor.has(c)) groundByColor.set(c, []);
+    groundByColor.get(c).push({ minI: i, maxI: i + 1, minJ: j, maxJ: j + 1 });
+  }
+  return {
+    groundByColor, water,
+    under: sortOnce(items.filter(isBack)), mid: sortOnce(front.filter(behindTram)), over: sortOnce(front.filter(it => !behindTram(it))),
+  };
 }
 
 /** Tri du peintre simple pour des éléments qui ne se chevauchent pas : de l'arrière vers l'avant. */
@@ -4835,9 +4897,9 @@ function outerStrip(along, k, width) {
 }
 
 /** Champs, vignes, forêts, routes et rivières de la campagne : tout est au sol, rien ne cache le campus. */
-function drawCountryside(site) {
-  const { rivers } = countryFor(site), snow = world.snow, area = visibleArea();
-  const fields = countryFor(site).fields.filter(f => onScreen(f, area));
+function drawCountryside(site, area) {
+  const { rivers } = countryFor(site), snow = world.snow;
+  const fields = countryFor(site).fields.filter(f => inArea(f, area));
   for (const f of fields) {
     ctx.beginPath(); diamond(f.minI, f.minJ, f.maxI - f.minI, f.maxJ - f.minJ);
     ctx.fillStyle = rgb(mix(FIELD_COLORS[f.kind], SNOW, f.kind === 'foret' ? snow * 0.5 : snow), f.shade); ctx.fill();
@@ -4884,16 +4946,12 @@ function drawTram(u) {
   box(u, j, 4, 0.7, 13, 1.5, [196,40,60]);
 }
 
-/** Campagne, sol de la couronne de ville, eau et marquage du boulevard. */
-function drawBackdropGround(site = state.site) {
+/** Sol de la couronne de ville (une passe de remplissage par couleur), eau et marquage du boulevard. */
+function drawTownGround(site, area) {
   const town = townFor(site);
-  drawCountryside(site);
-  // une seule passe de remplissage par couleur
-  const byColor = new Map();
-  for (const [k, c] of town.ground) { if (!byColor.has(c)) byColor.set(c, []); byColor.get(c).push(k); }
-  for (const [c, keys] of byColor) {
+  for (const [c, tiles] of town.groundByColor) {
     ctx.beginPath();
-    for (const k of keys) diamond(Math.floor(k / 100) + LO, (k % 100) + LO);
+    for (const t of tiles) if (inArea(t, area)) diamond(t.minI, t.minJ);
     ctx.fillStyle = c === WATER ? windowColor(WATER, false, 1) : rgb(c === GRASS1 || c === GRASS2 ? mix(c, SNOW, world.snow) : c);
     ctx.fill();
   }
@@ -4901,36 +4959,185 @@ function drawBackdropGround(site = state.site) {
   ctx.strokeStyle = rgb(WHITE, 1, 0.55); ctx.lineWidth = 1.2; ctx.setLineDash([6, 8]); ctx.lineDashOffset = 0;
   isoLine(iso(LO, -0.5), iso(HI, -0.5)); isoLine(iso(-0.5, LO), iso(-0.5, HI)); isoLine(iso(LO, N + 0.5), iso(HI, N + 0.5)); isoLine(iso(N + 0.5, LO), iso(N + 0.5, HI));
   ctx.setLineDash([]);
-  if (!REDUCED_MOTION && town.water.length) { // reflets sur l'eau
+  if (town.water.length) { // reflets sur l'eau (fixes : le décor est dessiné une fois, voir backdrop-tiles.js)
     ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1;
-    for (let k = 0; k < town.water.length; k += 5) { const [wi, wj] = town.water[k], [x, y] = iso(wi + 0.5, wj + 0.5), p = (world.t * 0.4 + k * 0.13) % 1; line(x - 6 + p * 4, y, x + 2 + p * 4, y); }
+    for (let k = 0; k < town.water.length; k += 5) { const [wi, wj] = town.water[k], [x, y] = iso(wi + 0.5, wj + 0.5), p = (k * 0.13) % 1; line(x - 6 + p * 4, y, x + 2 + p * 4, y); }
   }
 }
 
-/** Partie du monde visible à l'écran, avec une marge pour les toits et les tours (hauteur des monuments). */
-function visibleArea() {
-  const hw = view.w / 2 / camera.z, hh = view.h / 2 / camera.z;
-  return { x0: camera.x - hw - 40, x1: camera.x + hw + 40, y0: camera.y - hh - 40, y1: camera.y + hh + 260 };
-}
-/** L'emprise au sol d'un élément tombe-t-elle dans la zone visible ? */
-const onScreen = (it, a) => (it.minI - it.maxJ) * 32 < a.x1 && (it.maxI - it.minJ) * 32 > a.x0
-  && (it.minI + it.minJ) * 16 < a.y1 && (it.maxI + it.maxJ) * 16 > a.y0;
+/**
+ * Un élément (emprise au sol en cases) peut-il toucher la zone `area` du monde (pixels) ?
+ * Marges : les toits et les tours montent jusqu'à 260 px au-dessus de l'emprise, les ombres débordent un peu.
+ */
+const inArea = (it, a) => (it.minI - it.maxJ) * 32 - 40 < a.x1 && (it.maxI - it.minJ) * 32 + 40 > a.x0
+  && (it.minI + it.minJ) * 16 - 260 < a.y1 && (it.maxI + it.maxJ) * 16 + 40 > a.y0;
 
-/** Éléments de la ville autour : 'back' avant le campus, 'front' après (seulement ceux qui sont à l'écran). */
-function drawBackdrop(layer, site = state.site) {
-  const town = townFor(site), area = visibleArea();
-  let items = town[layer];
-  if (layer === 'front' && site === 'reims') { // le tramway bouge : il est trié à chaque image avec le premier plan
-    const u = tramPosition();
-    items = sortOnce([...items, { minI: u, maxI: u + 4, minJ: N + 1.15, maxJ: N + 1.85, draw: () => drawTram(u) }]);
+/**
+ * Couches du décor, dessinées dans cet ordre avec la scène du campus :
+ * 'under' (campagne, sol, ville de l'arrière) → campus → 'mid' (avant, derrière le tramway) → tramway → 'over' (avant, devant le tramway).
+ */
+const BACKDROP_LAYERS = ['under', 'mid', 'over'];
+
+/** La zone recouvre-t-elle le campus (dont le sol fixe est aussi mis en cache) ? */
+const touchesCampus = a => a.x0 < N * 32 && a.x1 > -N * 32 && a.y0 < N * 32 && a.y1 > 0;
+
+/** La couche contient-elle quelque chose dans la zone ? (le sol remplit toujours 'under') */
+const backdropHasContent = (layer, area, site = state.site) => layer === 'under' || townFor(site)[layer].some(it => inArea(it, area));
+
+/** Dessine la partie `area` (monde) d'une couche du décor : c'est le rendu d'une tuile (voir backdrop-tiles.js). */
+function drawBackdropArea(layer, area, site = state.site) {
+  const town = townFor(site);
+  if (layer === 'under') {
+    drawCountryside(site, area);
+    drawTownGround(site, area);
+    if (touchesCampus(area)) drawGroundStatic();
   }
-  for (const it of items) if (onScreen(it, area)) it.draw();
+  for (const it of town[layer]) if (inArea(it, area)) it.draw();
+}
+
+/** Le tramway de Reims bouge : il est dessiné à chaque image, entre les couches 'mid' et 'over'. */
+function drawBackdropTram(site = state.site) {
+  if (site === 'reims') drawTram(tramPosition());
+}
+
+
+/* ===== js/render/backdrop-tiles.js ===== */
+/**
+ * Cache du décor (ville et campagne) en tuiles, comme une carte en ligne.
+ *
+ * Le décor ne bouge pas (sauf le tramway, dessiné à part) mais coûte cher à dessiner : il est rendu par carrés
+ * de TILE pixels écran dans des canvas hors écran, puis simplement recopié à chaque image.
+ * - Les tuiles dépendent de la ville, du zoom et de la densité de pixels : un changement de ville ou un zoom
+ *   terminé crée un nouveau jeu de tuiles (pendant le geste de zoom, l'ancien est étiré).
+ * - L'éclairage (nuit), la neige et la saison forment l'« ambiance » d'une tuile ; le sol fixe du campus en fait aussi partie
+ *   (groundVersion : parcelles construites). Quand l'une change, les tuiles sont redessinées petit à petit
+ *   (budget de REFRESH_BUDGET ms par image), sans à-coup.
+ * - Une tuile visible qui manque est dessinée tout de suite, pour ne jamais laisser de trou.
+ */
+
+/** Côté d'une tuile, en pixels réels de l'écran. */
+const TILE = 256;
+/** Temps de rendu accordé par image aux tuiles à rafraîchir (ms). */
+const REFRESH_BUDGET = 4;
+/** Délai sans changement de zoom avant de redessiner les tuiles au nouveau zoom (ms). */
+const ZOOM_SETTLE = 250;
+/** Tuiles gardées autour de l'écran (préchargées quand il reste du temps). */
+const PREFETCH = 1;
+
+/** Jeu de tuiles courant : {site, z, dpr, tiles: Map<string, tile>}. */
+let tileSet = null;
+let lastZoom = 0, lastZoomChange = 0;
+
+/** Ambiance actuelle : une tuile dessinée avec une autre ambiance est à rafraîchir. */
+const mood = () => `${Math.round(world.night * 25)}|${Math.round(world.snow * 20)}|${world.season}`;
+
+function newTileSet() {
+  tileSet = { site: state.site, z: camera.z, dpr: view.dpr, tiles: new Map() };
+}
+
+/** Zone du monde couverte par une tuile (en pixels du monde, avant zoom). */
+function tileArea(tx, ty) {
+  const k = tileSet.z * tileSet.dpr;
+  return { x0: tx * TILE / k, x1: (tx + 1) * TILE / k, y0: ty * TILE / k, y1: (ty + 1) * TILE / k };
+}
+
+function newLayerCanvas() {
+  const c = document.createElement('canvas');
+  c.width = c.height = TILE;
+  const g = c.getContext('2d');
+  g.lineJoin = 'round';
+  return g;
+}
+
+/** Dessine (ou redessine) les trois couches d'une tuile. */
+function renderTile(tx, ty) {
+  const key = tx + ',' + ty, area = tileArea(tx, ty), k = tileSet.z * tileSet.dpr;
+  const tile = tileSet.tiles.get(key) || { layers: {} };
+  for (const layer of BACKDROP_LAYERS) {
+    if (!backdropHasContent(layer, area, tileSet.site)) { delete tile.layers[layer]; continue; }
+    const g = tile.layers[layer] || (tile.layers[layer] = newLayerCanvas());
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, TILE, TILE);
+    g.setTransform(k, 0, 0, k, -tx * TILE, -ty * TILE);
+    drawInto(g, () => drawBackdropArea(layer, area, tileSet.site));
+  }
+  tile.mood = mood();
+  tile.ground = touchesCampus(area) ? groundVersion() : null;
+  tileSet.tiles.set(key, tile);
+}
+
+/** Tuiles qui couvrent l'écran (plus `pad` autour), dans le repère du jeu de tuiles. */
+function tileRange(scale, ox, oy, pad) {
+  return {
+    tx0: Math.floor(-ox / scale / TILE) - pad, tx1: Math.floor((view.w * view.dpr - ox) / scale / TILE) + pad,
+    ty0: Math.floor(-oy / scale / TILE) - pad, ty1: Math.floor((view.h * view.dpr - oy) / scale / TILE) + pad,
+  };
+}
+
+/** Oublie les tuiles loin de l'écran (mémoire). */
+function evict(range) {
+  const margin = 4;
+  for (const key of tileSet.tiles.keys()) {
+    const [tx, ty] = key.split(',').map(Number);
+    if (tx < range.tx0 - margin || tx > range.tx1 + margin || ty < range.ty0 - margin || ty > range.ty1 + margin) tileSet.tiles.delete(key);
+  }
+}
+
+let tileFrame = null;
+
+/**
+ * À appeler au début de chaque image : choisit le jeu de tuiles, dessine les tuiles manquantes
+ * et rafraîchit celles dont l'ambiance a changé, dans la limite du budget.
+ */
+function prepareBackdrop() {
+  const now = performance.now();
+  if (camera.z !== lastZoom) { lastZoom = camera.z; lastZoomChange = now; }
+  const stale = !tileSet || tileSet.site !== state.site || tileSet.dpr !== view.dpr;
+  const zoomed = tileSet && tileSet.z !== camera.z;
+  const ratio = tileSet ? camera.z / tileSet.z : 1;
+  if (stale || (zoomed && (now - lastZoomChange > ZOOM_SETTLE || ratio < 0.8 || ratio > 1.6))) newTileSet();
+
+  const scale = camera.z / tileSet.z, [ox, oy] = worldOrigin();
+  const visible = tileRange(scale, ox, oy, 0), current = mood(), ground = groundVersion();
+  const outdated = tile => tile.mood !== current || (tile.ground !== null && tile.ground !== ground);
+  // 1. aucune tuile visible ne doit manquer
+  for (let ty = visible.ty0; ty <= visible.ty1; ty++) for (let tx = visible.tx0; tx <= visible.tx1; tx++) {
+    if (!tileSet.tiles.has(tx + ',' + ty)) renderTile(tx, ty);
+  }
+  // 2. puis, dans le budget : tuiles visibles d'une autre ambiance, puis tuiles autour de l'écran
+  const around = tileRange(scale, ox, oy, PREFETCH), start = performance.now();
+  outer: for (const pass of [visible, around]) {
+    for (let ty = pass.ty0; ty <= pass.ty1; ty++) for (let tx = pass.tx0; tx <= pass.tx1; tx++) {
+      if (performance.now() - start > REFRESH_BUDGET) break outer;
+      const tile = tileSet.tiles.get(tx + ',' + ty);
+      if (!tile || outdated(tile)) renderTile(tx, ty);
+    }
+  }
+  evict(around);
+  tileFrame = { scale, ox, oy, visible };
+}
+
+/** Recopie une couche du décor à l'écran (après prepareBackdrop). */
+function drawBackdropLayer(layer) {
+  if (!tileFrame) return;
+  const { scale, ox, oy, visible } = tileFrame, size = TILE * scale;
+  const exact = scale === 1; // au zoom des tuiles : pixel pour pixel, sans raccord visible
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = !exact;
+  for (let ty = visible.ty0; ty <= visible.ty1; ty++) for (let tx = visible.tx0; tx <= visible.tx1; tx++) {
+    const g = tileSet.tiles.get(tx + ',' + ty)?.layers[layer];
+    if (!g) continue;
+    if (exact) ctx.drawImage(g.canvas, tx * TILE + ox, ty * TILE + oy);
+    else ctx.drawImage(g.canvas, tx * size + ox, ty * size + oy, size + 1, size + 1); // +1 : pas de fente entre tuiles étirées
+  }
+  ctx.restore();
 }
 
 
 /* ===== js/render/renderer.js ===== */
 /**
- * Rendu d'une image : ciel, sol, scène triée en profondeur, aperçu de pose, halos, flèches, effets.
+ * Rendu d'une image : décor en tuiles (backdrop-tiles.js), sol, scène triée en profondeur, aperçu de pose, halos, flèches, effets.
  * Fournit aussi le test de clic sur les bâtiments et les flèches.
  */
 
@@ -4967,22 +5174,7 @@ const HIT_ORDER = Object.fromEntries(SITES.map(s => [s.id, [...SITE_DEFS[s.id]].
 /** Flèches affichées cette image, pour le test de clic : {id, x, y, r}. */
 const arrowBubbles = [];
 
-function drawSky() {
-  const { w: W, h: H } = view, night = world.night;
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, css(mix([116,196,250], [16,22,60], night)));
-  g.addColorStop(1, css(mix([214,240,255], [54,56,116], night)));
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  if (night > 0.05) {
-    ctx.fillStyle = `rgba(255,255,255,${0.8 * night})`;
-    for (let k = 0; k < 70; k++) ctx.fillRect(hash(k, 1, 1) * W, hash(k, 2, 2) * H * 0.7, 1.5, 1.5);
-  }
-  ctx.fillStyle = `rgba(255,255,255,${0.75 - night * 0.55})`;
-  for (let k = 0; k < 5; k++) { // nuages qui défilent
-    const w = 90 + hash(k, 5, 5) * 80, x = ((hash(k, 3, 3) * (W + 300) + world.t * (6 + k * 2)) % (W + 300)) - 150, y = 90 + hash(k, 4, 4) * H * 0.55;
-    ellipse(x, y, w * 0.5, 14); ellipse(x - w * 0.18, y - 10, w * 0.24, 16); ellipse(x + w * 0.14, y - 12, w * 0.2, 14);
-  }
-}
+/** Fond sous le décor (visible seulement si une tuile manque un instant) : la couleur moyenne des champs. */const BACKGROUND = [168,176,104];
 
 /** Pastille avec une flèche vers le haut : verte = amélioration possible, dorée = conseil de Plume. */
 function drawArrow(x, y, r, gold) {
@@ -5022,16 +5214,19 @@ function drawPlacementPreview() {
 
 function renderFrame() {
   const { w: W, h: H, dpr } = view;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  drawSky();
-  ctx.setTransform(dpr * camera.z, 0, 0, dpr * camera.z, dpr * (W / 2 - camera.x * camera.z), dpr * (H / 2 - camera.y * camera.z));
+  prepareBackdrop();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = rgb(BACKGROUND); ctx.fillRect(0, 0, W * dpr, H * dpr);
+  drawBackdropLayer('under');
+  const [ox, oy] = worldOrigin();
+  ctx.setTransform(dpr * camera.z, 0, 0, dpr * camera.z, ox, oy);
   ctx.lineJoin = 'round';
-  drawBackdropGround();
   drawGround();
-  drawBackdrop('back');
   const items = sceneryItems().concat(BUILDING_ITEMS[state.site], walkerItems(), critterItems());
   for (const item of isoSort(items)) item.draw();
-  drawBackdrop('front');
+  drawBackdropLayer('mid');
+  drawBackdropTram();
+  drawBackdropLayer('over');
   drawPlacementPreview();
   drawLampGlows();
   drawFlyingCritters();
@@ -5062,6 +5257,52 @@ function buildingAt(wx, wy) {
     if (insidePolygon(wx, wy, outline)) return d;
   }
   return null;
+}
+
+
+/* ===== js/render/quality.js ===== */
+/**
+ * Qualité d'affichage : si l'appareil n'arrive pas à suivre, la résolution baisse d'un cran (densité de pixels 2 → 1,5 → 1),
+ * puis le rendu passe à 30 images par seconde en dernier recours. Le mode économie (Options) impose directement le plus bas.
+ */
+
+const QUALITY_LEVELS = [{ dpr: 2, half: false }, { dpr: 1.5, half: false }, { dpr: 1, half: false }, { dpr: 1, half: true }];
+/** Une image « lente » : moins de 40 images par seconde. */
+const SLOW_FRAME = 1 / 40;
+/** Nombre d'images mesurées avant de décider (la médiane ignore les à-coups isolés). */
+const SAMPLE = 90;
+
+let qualityLevel = 0, frameSamples = [], renderedFrames = 0;
+const activeQualityLevel = () => (state.eco ? QUALITY_LEVELS.length - 1 : qualityLevel);
+const applyQuality = () => setPixelRatioCap(QUALITY_LEVELS[activeQualityLevel()].dpr);
+
+/** À appeler une fois la partie chargée (le mode économie est dans la sauvegarde). */
+const initQuality = applyQuality;
+
+/** Mode économie (Options) ; en le quittant, la qualité automatique repart du plus haut. */
+function setEcoMode(on) {
+  state.eco = on;
+  qualityLevel = 0;
+  frameSamples = [];
+  applyQuality();
+}
+
+/**
+ * À chaque image : mesure le temps réel écoulé et baisse la qualité si besoin.
+ * @returns {boolean} false s'il faut sauter le dessin de cette image (mode 30 images par seconde)
+ */
+function shouldRender(realDt) {
+  renderedFrames++;
+  if (!state.eco && realDt > 0 && realDt < 0.25) { // au-delà : onglet en arrière-plan, pas une image lente
+    frameSamples.push(realDt);
+    if (frameSamples.length >= SAMPLE) {
+      frameSamples.sort((a, b) => a - b);
+      const median = frameSamples[frameSamples.length >> 1];
+      frameSamples = [];
+      if (median > SLOW_FRAME && qualityLevel < QUALITY_LEVELS.length - 1) { qualityLevel++; applyQuality(); }
+    }
+  }
+  return !QUALITY_LEVELS[activeQualityLevel()].half || renderedFrames % 2 === 0;
 }
 
 
@@ -6172,7 +6413,7 @@ function initMascot() {
 
 
 /* ===== js/ui/options.js ===== */
-/** Fenêtre Options : son, musique, conseils, export/import de la sauvegarde, nouvelle partie. */
+/** Fenêtre Options : son, musique, conseils, mode économie, export/import de la sauvegarde, nouvelle partie. */
 
 /** Bouton à double clic : le premier arme (texte de confirmation), le second exécute. */
 function confirmButton(button, confirmLabel, action, onArm = () => {}) {
@@ -6235,6 +6476,7 @@ function openOptions() {
     <label class="opt"><input type="checkbox" id="oMusic" ${state.music ? 'checked' : ''}> Musique</label>
     <label class="opt"><input type="checkbox" id="oSound" ${state.muted ? '' : 'checked'}> Effets sonores</label>
     <label class="opt"><input type="checkbox" id="oTips" ${state.tipsOff ? '' : 'checked'}> Conseils de Plume</label>
+    <label class="opt"><input type="checkbox" id="oEco" ${state.eco ? 'checked' : ''}> Mode économie (appareil lent : image plus légère, 30 images par seconde)</label>
     <p class="small">Morceau en cours : ${musicTitle()} (il change selon le jour, la nuit et la saison).</p>
     <button type="button" class="btn sm" id="oReplay">Revoir tous les conseils de Plume</button>
     <p class="small">Glisse pour te déplacer, molette ou pincement pour zoomer. La partie est sauvegardée automatiquement dans ce navigateur. Saison actuelle : ${SEASON_NAME[world.season].toLowerCase()} (chaque saison dure 20 min).</p>
@@ -6250,6 +6492,7 @@ function openOptions() {
   $('oSound').onchange = e => { setSoundEnabled(e.target.checked); save(); };
   $('oMusic').onchange = e => { setMusicEnabled(e.target.checked); save(); };
   $('oTips').onchange = e => { state.tipsOff = !e.target.checked; if (state.tipsOff) hideMascot(); save(); };
+  $('oEco').onchange = e => { setEcoMode(e.target.checked); save(); };
   $('oReplay').onclick = () => {
     state.tips = {}; state.tipsOff = false;
     save(); closeModal();
@@ -6671,7 +6914,7 @@ function frame(now) {
   updateCritters(game);
   updateHarvest(game);
 
-  renderFrame();
+  if (shouldRender(real)) renderFrame();
   updateHud();
   updateDecisionCard();
   uiTimer += dt;
@@ -6695,6 +6938,7 @@ function start(hot = {}) {
   if (!restored) setState(sanitize(loadSaved()));
 
   resizeCanvas();
+  initQuality();
   if (hot.cam) { Object.assign(camera, hot.cam); clampCamera(); } else fitCamera();
   resetWalkers(24);
 
