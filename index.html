@@ -351,6 +351,10 @@ body {
 .big-num svg { width: 38px; height: 38px; }
 .opt { display: flex; align-items: center; gap: 10px; font-weight: 900; font-size: 15px; margin: 6px 0 12px; cursor: pointer; }
 .opt input { width: 22px; height: 22px; accent-color: var(--go); }
+/* curseurs de volume (musique, bruitages) */
+.opt.vol span { flex: 0 0 118px; }
+.opt.vol input { flex: 1; width: auto; height: 22px; min-width: 0; }
+.opt.vol b { flex: 0 0 52px; text-align: right; font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 
 .pseudo input, .modal textarea {
   flex: 1; min-width: 0; font: inherit; font-weight: 800; font-size: 14px;
@@ -1526,7 +1530,7 @@ function freshState() {
     city: 'reims', site: 'reims', palmes: 0, accreds: 0,
     b: buildings, obj: 0, boost: 0, evt: null, buy: 1,
     rush: 0, coffee: 0, cd: {}, mission: null, chests: 0, gems: 0, shop: {},
-    muted: false, music: true, intro: false, pseudo: '',
+    muted: false, music: true, musicVol: 0.7, sfxVol: 0.8, intro: false, pseudo: '',
     ach: {}, jpo: 0, seen: {},
     deco: {}, cards: {},
     daily: null, weekly: null, hist: [], rec: {},
@@ -1563,6 +1567,7 @@ function sanitize(o) {
   for (const k of ['money', 'run', 'total', 'best', 'bestGain', 'dip', 'promos', 'ects', 'obj', 'boost', 'jpo', 't', 'runStart', 'cityStart',
     'palmes', 'accreds', 'rush', 'coffee', 'chests', 'gems', 'dipDone']) if (isNum(o[k])) f[k] = Math.max(0, o[k]);
   for (const k of ['muted', 'music', 'intro', 'tipsOff', 'autoOn', 'campusDone', 'eco']) if (typeof o[k] === 'boolean') f[k] = o[k];
+  for (const k of ['musicVol', 'sfxVol']) if (isNum(o[k])) f[k] = clamp(o[k], 0.05, 1);
   if (typeof o.pseudo === 'string') f.pseudo = o.pseudo.slice(0, 24);
   if (o.buy === 1 || o.buy === 10 || o.buy === 'max') f.buy = o.buy;
   if (isObj(o.ach)) for (const k in o.ach) if (isNum(o.ach[k])) f.ach[k] = o.ach[k];
@@ -1608,7 +1613,7 @@ function sanitize(o) {
     const kept = {
       dipDone: f.dip, promos: f.promos, ects: Math.min(MAX_ECTS_REFUND, f.ects + oldTreeRefund(o.tree)), total: f.total, best: f.best, bestGain: f.bestGain,
       ach: f.ach, cards: f.cards, jpo: f.jpo, seen: f.seen, deco: { reims: f.deco.reims || [] }, daily: f.daily, weekly: f.weekly,
-      hist: f.hist, rec: f.rec, tips: f.tips, tipsOff: f.tipsOff, muted: f.muted, music: f.music, intro: f.intro, pseudo: f.pseudo,
+      hist: f.hist, rec: f.rec, tips: f.tips, tipsOff: f.tipsOff, muted: f.muted, music: f.music, musicVol: f.musicVol, sfxVol: f.sfxVol, intro: f.intro, pseudo: f.pseudo,
       buy: f.buy, obj: 0, autoOn: f.autoOn, eco: f.eco,
     };
     return { ...freshState(), ...kept, migrated: 'v5' };
@@ -2488,7 +2493,7 @@ function moveToNextCity() {
 
 /** Champs conservés par l'accréditation nationale (tout le reste repart de zéro). */
 const KEPT_ON_ACCREDITATION = ['total', 'best', 'bestGain', 'promos', 'ach', 'jpo', 'seen', 'cards', 'gems', 'shop', 'chests',
-  'daily', 'weekly', 'hist', 'rec', 'tips', 'tipsOff', 'muted', 'music', 'intro', 'pseudo', 'buy', 'autoOn', 'obj', 'eco'];
+  'daily', 'weekly', 'hist', 'rec', 'tips', 'tipsOff', 'muted', 'music', 'intro', 'pseudo', 'buy', 'autoOn', 'obj', 'eco', 'musicVol', 'sfxVol'];
 
 /**
  * Accréditation nationale (2ᵉ niveau de prestige) : une fois Charleville labellisée, on repart de Reims
@@ -2515,8 +2520,8 @@ function finishTransition() {
 
 /** Nouvelle partie (garde seulement les réglages et le pseudo). */
 function resetGame() {
-  const { music, muted, pseudo, eco } = state;
-  setState({ ...freshState(), intro: true, music, muted, pseudo, eco });
+  const { music, muted, pseudo, eco, musicVol, sfxVol } = state;
+  setState({ ...freshState(), intro: true, music, muted, pseudo, eco, musicVol, sfxVol });
   restartScene();
   clearDecision();
   fitCamera();
@@ -2983,6 +2988,17 @@ function schedule() {
   } catch (e) { /* contexte fermé : on ignore */ }
 }
 
+/** Volume de la musique à fond, et réglage du joueur (0 à 1). */
+const MUSIC_LEVEL = 0.55;
+let musicLevel = 1;
+
+/** Règle le volume de la musique (0 à 1), tout de suite si elle joue. */
+function setMusicLevel(level) {
+  musicLevel = level;
+  const ac = audioCtx();
+  if (playing && master && ac) { master.gain.cancelScheduledValues(ac.currentTime); master.gain.setTargetAtTime(MUSIC_LEVEL * level, ac.currentTime, 0.08); }
+}
+
 function startMusic() {
   if (playing) return;
   const ac = ensureNodes();
@@ -2990,7 +3006,7 @@ function startMusic() {
   playing = true;
   nextTime = ac.currentTime + 0.1;
   master.gain.cancelScheduledValues(ac.currentTime);
-  master.gain.setTargetAtTime(0.55, ac.currentTime, 0.5);
+  master.gain.setTargetAtTime(MUSIC_LEVEL * musicLevel, ac.currentTime, 0.5);
   schedule();
   timer = setInterval(schedule, 50);
 }
@@ -3033,7 +3049,7 @@ function unlockAudio() {
 function playSound(name) {
   const ac = audioCtx();
   if (!ac || state.muted || !SOUNDS[name]) return;
-  const [freqs, dur, type, vol] = SOUNDS[name], t0 = ac.currentTime;
+  const [freqs, dur, type, base] = SOUNDS[name], vol = Math.max(0.0002, base * state.sfxVol), t0 = ac.currentTime;
   freqs.forEach((f, k) => {
     try {
       const o = ac.createOscillator(), g = ac.createGain(), t = t0 + k * dur;
@@ -3046,7 +3062,7 @@ function playSound(name) {
 
 function setMusicEnabled(on) {
   state.music = on;
-  if (on) { unlockAudio(); startMusic(); } else stopMusic();
+  if (on) { setMusicLevel(state.musicVol); unlockAudio(); startMusic(); } else stopMusic();
 }
 
 function setSoundEnabled(on) {
@@ -3056,12 +3072,26 @@ function setSoundEnabled(on) {
 
 /** Coupe la musique quand l'onglet est caché, la relance au retour. */
 function initAudio() {
+  setMusicLevel(state.musicVol);
   document.addEventListener('pointerdown', unlockAudio);
   document.addEventListener('keydown', unlockAudio);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) stopMusic();
     else if (state.music && audioCtx()) startMusic();
   });
+}
+
+/** Volume de la musique (0 à 1) ; à 0 la musique est coupée, au-dessus elle reprend. */
+function setMusicVolume(volume) {
+  if (volume > 0) state.musicVol = volume;
+  setMusicLevel(state.musicVol);
+  if ((volume > 0) !== state.music) setMusicEnabled(volume > 0);
+}
+
+/** Volume des bruitages (0 à 1) ; à 0 ils sont coupés. */
+function setSoundVolume(volume) {
+  if (volume > 0) state.sfxVol = volume;
+  if ((volume > 0) === state.muted) setSoundEnabled(volume > 0);
 }
 
 
@@ -6412,97 +6442,6 @@ function initMascot() {
 }
 
 
-/* ===== js/ui/options.js ===== */
-/** Fenêtre Options : son, musique, conseils, mode économie, export/import de la sauvegarde, nouvelle partie. */
-
-/** Bouton à double clic : le premier arme (texte de confirmation), le second exécute. */
-function confirmButton(button, confirmLabel, action, onArm = () => {}) {
-  let armed = false;
-  button.onclick = () => {
-    if (armed) { action(); return; }
-    armed = true;
-    button.textContent = confirmLabel;
-    button.classList.add('hot');
-    onArm();
-  };
-}
-
-function bindSaveCode() {
-  const box = $('oIO'), code = $('oCode'), msg = $('oMsg'), load = $('oLoad');
-  $('oExport').onclick = () => {
-    box.hidden = false;
-    $('oLbl').textContent = 'Ton code de sauvegarde (garde-le précieusement) :';
-    code.value = encodeSave();
-    $('oCopy').hidden = false; load.hidden = true; msg.textContent = '';
-    code.select();
-  };
-  $('oImport').onclick = () => {
-    box.hidden = false;
-    $('oLbl').textContent = 'Colle ici un code de sauvegarde :';
-    code.value = '';
-    $('oCopy').hidden = true; load.hidden = false; msg.textContent = '';
-    load.textContent = 'Charger ce code'; load.classList.remove('hot');
-    bindLoad();
-    code.focus();
-  };
-  $('oCopy').onclick = () => {
-    const fallback = () => { code.select(); msg.textContent = 'Sélectionné : copie-le avec Ctrl+C.'; };
-    try { navigator.clipboard.writeText(code.value).then(() => { msg.textContent = 'Code copié.'; }, fallback); } catch (e) { fallback(); }
-  };
-  const bindLoad = () => {
-    let armed = false;
-    load.onclick = () => {
-      let data;
-      try { data = decodeSave(code.value); } catch (e) {
-        msg.textContent = `Ce code n’est pas valide. Vérifie qu’il commence par ${SAVE_CODE_PREFIX} et qu’il est complet.`;
-        return;
-      }
-      if (!armed) {
-        armed = true;
-        load.textContent = 'Confirmer : remplacer ma partie';
-        load.classList.add('hot');
-        msg.textContent = 'Ta partie actuelle sera remplacée.';
-        return;
-      }
-      importGame(data);
-      closeSheets();
-      closeModal();
-    };
-  };
-}
-
-function openOptions() {
-  openModal('Options', `
-    <label class="opt"><input type="checkbox" id="oMusic" ${state.music ? 'checked' : ''}> Musique</label>
-    <label class="opt"><input type="checkbox" id="oSound" ${state.muted ? '' : 'checked'}> Effets sonores</label>
-    <label class="opt"><input type="checkbox" id="oTips" ${state.tipsOff ? '' : 'checked'}> Conseils de Plume</label>
-    <label class="opt"><input type="checkbox" id="oEco" ${state.eco ? 'checked' : ''}> Mode économie (appareil lent : image plus légère, 30 images par seconde)</label>
-    <p class="small">Morceau en cours : ${musicTitle()} (il change selon le jour, la nuit et la saison).</p>
-    <button type="button" class="btn sm" id="oReplay">Revoir tous les conseils de Plume</button>
-    <p class="small">Glisse pour te déplacer, molette ou pincement pour zoomer. La partie est sauvegardée automatiquement dans ce navigateur. Saison actuelle : ${SEASON_NAME[world.season].toLowerCase()} (chaque saison dure 20 min).</p>
-    <p class="small">Total gagné depuis le début : <b>${eur(state.total)}</b></p>
-    <h3 class="eyebrow sec">Sauvegarde</h3>
-    <div class="m-row"><button type="button" class="btn sm" id="oExport">Exporter ma partie</button><button type="button" class="btn sm" id="oImport">Importer une partie</button></div>
-    <div id="oIO" hidden><label class="small" for="oCode" id="oLbl"></label><textarea id="oCode" rows="4" spellcheck="false"></textarea>
-      <div class="m-row"><button type="button" class="btn sm" id="oCopy">Copier le code</button><button type="button" class="btn go sm" id="oLoad">Charger ce code</button></div><p class="small" id="oMsg"></p></div>
-    <h3 class="eyebrow sec">Nouvelle partie</h3>
-    <button type="button" class="btn sm" id="oReset">Recommencer depuis zéro</button>`,
-  [{ label: 'Fermer', cls: 'go', onClick: closeModal }]);
-
-  $('oSound').onchange = e => { setSoundEnabled(e.target.checked); save(); };
-  $('oMusic').onchange = e => { setMusicEnabled(e.target.checked); save(); };
-  $('oTips').onchange = e => { state.tipsOff = !e.target.checked; if (state.tipsOff) hideMascot(); save(); };
-  $('oEco').onchange = e => { setEcoMode(e.target.checked); save(); };
-  $('oReplay').onclick = () => {
-    state.tips = {}; state.tipsOff = false;
-    save(); closeModal();
-    notify.toast('Plume va tout te réexpliquer.');
-  };
-  bindSaveCode();
-  confirmButton($('oReset'), 'Confirmer : tout effacer', () => { resetGame(); closeSheets(); closeModal(); });
-}
-
-
 /* ===== js/ui/hud.js ===== */
 /** Bandeau du haut (argent, revenus, étudiants, diplômés, événement, JPO), objectif, saison, sites et bouton musique. */
 
@@ -6578,6 +6517,107 @@ function paintMusicButton() {
   b.classList.toggle('off', !state.music);
   b.setAttribute('aria-pressed', state.music ? 'true' : 'false');
   b.setAttribute('aria-label', state.music ? 'Couper la musique' : 'Lancer la musique');
+}
+
+
+/* ===== js/ui/options.js ===== */
+/** Fenêtre Options : son, musique, conseils, mode économie, export/import de la sauvegarde, nouvelle partie. */
+
+/** Position d'un curseur de volume : 0 si le son est coupé. */
+const volumePercent = (on, volume) => (on ? Math.round(volume * 100) : 0);
+
+/** Bouton à double clic : le premier arme (texte de confirmation), le second exécute. */
+function confirmButton(button, confirmLabel, action, onArm = () => {}) {
+  let armed = false;
+  button.onclick = () => {
+    if (armed) { action(); return; }
+    armed = true;
+    button.textContent = confirmLabel;
+    button.classList.add('hot');
+    onArm();
+  };
+}
+
+function bindSaveCode() {
+  const box = $('oIO'), code = $('oCode'), msg = $('oMsg'), load = $('oLoad');
+  $('oExport').onclick = () => {
+    box.hidden = false;
+    $('oLbl').textContent = 'Ton code de sauvegarde (garde-le précieusement) :';
+    code.value = encodeSave();
+    $('oCopy').hidden = false; load.hidden = true; msg.textContent = '';
+    code.select();
+  };
+  $('oImport').onclick = () => {
+    box.hidden = false;
+    $('oLbl').textContent = 'Colle ici un code de sauvegarde :';
+    code.value = '';
+    $('oCopy').hidden = true; load.hidden = false; msg.textContent = '';
+    load.textContent = 'Charger ce code'; load.classList.remove('hot');
+    bindLoad();
+    code.focus();
+  };
+  $('oCopy').onclick = () => {
+    const fallback = () => { code.select(); msg.textContent = 'Sélectionné : copie-le avec Ctrl+C.'; };
+    try { navigator.clipboard.writeText(code.value).then(() => { msg.textContent = 'Code copié.'; }, fallback); } catch (e) { fallback(); }
+  };
+  const bindLoad = () => {
+    let armed = false;
+    load.onclick = () => {
+      let data;
+      try { data = decodeSave(code.value); } catch (e) {
+        msg.textContent = `Ce code n’est pas valide. Vérifie qu’il commence par ${SAVE_CODE_PREFIX} et qu’il est complet.`;
+        return;
+      }
+      if (!armed) {
+        armed = true;
+        load.textContent = 'Confirmer : remplacer ma partie';
+        load.classList.add('hot');
+        msg.textContent = 'Ta partie actuelle sera remplacée.';
+        return;
+      }
+      importGame(data);
+      closeSheets();
+      closeModal();
+    };
+  };
+}
+
+function openOptions() {
+  openModal('Options', `
+    <label class="opt vol"><span>Musique</span><input type="range" id="oMusic" min="0" max="100" step="5" value="${volumePercent(state.music, state.musicVol)}"><b id="oMusicV"></b></label>
+    <label class="opt vol"><span>Effets sonores</span><input type="range" id="oSound" min="0" max="100" step="5" value="${volumePercent(!state.muted, state.sfxVol)}"><b id="oSoundV"></b></label>
+    <label class="opt"><input type="checkbox" id="oTips" ${state.tipsOff ? '' : 'checked'}> Conseils de Plume</label>
+    <label class="opt"><input type="checkbox" id="oEco" ${state.eco ? 'checked' : ''}> Mode économie (appareil lent : image plus légère, 30 images par seconde)</label>
+    <p class="small">Morceau en cours : ${musicTitle()} (il change selon le jour, la nuit et la saison).</p>
+    <button type="button" class="btn sm" id="oReplay">Revoir tous les conseils de Plume</button>
+    <p class="small">Glisse pour te déplacer, molette ou pincement pour zoomer. La partie est sauvegardée automatiquement dans ce navigateur. Saison actuelle : ${SEASON_NAME[world.season].toLowerCase()} (chaque saison dure 20 min).</p>
+    <p class="small">Total gagné depuis le début : <b>${eur(state.total)}</b></p>
+    <h3 class="eyebrow sec">Sauvegarde</h3>
+    <div class="m-row"><button type="button" class="btn sm" id="oExport">Exporter ma partie</button><button type="button" class="btn sm" id="oImport">Importer une partie</button></div>
+    <div id="oIO" hidden><label class="small" for="oCode" id="oLbl"></label><textarea id="oCode" rows="4" spellcheck="false"></textarea>
+      <div class="m-row"><button type="button" class="btn sm" id="oCopy">Copier le code</button><button type="button" class="btn go sm" id="oLoad">Charger ce code</button></div><p class="small" id="oMsg"></p></div>
+    <h3 class="eyebrow sec">Nouvelle partie</h3>
+    <button type="button" class="btn sm" id="oReset">Recommencer depuis zéro</button>`,
+  [{ label: 'Fermer', cls: 'go', onClick: closeModal }]);
+
+  const bindVolume = (id, apply) => {
+    const input = $(id), label = $(id + 'V');
+    const paint = () => { label.textContent = +input.value ? input.value + ' %' : 'coupé'; };
+    paint();
+    input.oninput = () => { apply(input.value / 100); paint(); paintMusicButton(); };
+    input.onchange = () => save();
+  };
+  bindVolume('oMusic', setMusicVolume);
+  bindVolume('oSound', setSoundVolume);
+  $('oTips').onchange = e => { state.tipsOff = !e.target.checked; if (state.tipsOff) hideMascot(); save(); };
+  $('oEco').onchange = e => { setEcoMode(e.target.checked); save(); };
+  $('oReplay').onclick = () => {
+    state.tips = {}; state.tipsOff = false;
+    save(); closeModal();
+    notify.toast('Plume va tout te réexpliquer.');
+  };
+  bindSaveCode();
+  confirmButton($('oReset'), 'Confirmer : tout effacer', () => { resetGame(); closeSheets(); closeModal(); });
 }
 
 
