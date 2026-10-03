@@ -1,6 +1,6 @@
 // Service worker de la version web (PWA) : le jeu fonctionne hors ligne après une première visite.
-// 20261001162519 est remplacé à chaque build, ce qui renouvelle le cache.
-const CACHE = 'iut-tycoon-20261001162519';
+// 20261004013747 est remplacé à chaque build, ce qui renouvelle le cache.
+const CACHE = 'iut-tycoon-20261004013747';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

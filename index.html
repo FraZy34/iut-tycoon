@@ -237,7 +237,7 @@ body {
 .need { margin-top: 8px !important; text-align: center; font-weight: 900; color: var(--hot); font-size: 13px !important; min-height: 1.2em; font-variant-numeric: tabular-nums; }
 
 /* Listes (campus, conseil pédagogique, défis) */
-.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .row { display: flex; align-items: center; gap: 8px; }
 .row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 4px; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 12px; }
 .row-main:hover { background: var(--paper-2); }
@@ -245,7 +245,7 @@ body {
 .row.locked .tag { filter: grayscale(1) opacity(.55); }
 .row.rec .tag { box-shadow: 0 0 0 3px var(--coin); }
 .rn { min-width: 0; }
-.rn b { display: block; font-size: 14px; font-weight: 900; line-height: 1.15; }
+.rn b { display: block; font-size: 14px; font-weight: 900; line-height: 1.15; hyphens: auto; overflow-wrap: anywhere; }
 .rn small { display: block; font-size: 12px; color: var(--ink-soft); font-weight: 800; font-variant-numeric: tabular-nums; }
 .camp-pal { margin: 0 0 10px; font-size: 12.5px; font-weight: 900; color: var(--go-dk); line-height: 1.35; }
 .auto-row:empty { display: none; }
