@@ -617,8 +617,27 @@ body {
 @keyframes cinePulse { from { transform: scale(.92); opacity: 1; } to { transform: scale(1.25); opacity: 0; } }
 @keyframes cineGlow { 0%, 100% { box-shadow: 0 6px 0 var(--ink), 0 0 26px rgba(53,196,107,.35); } 50% { box-shadow: 0 6px 0 var(--ink), 0 0 50px rgba(53,196,107,.8); } }
 
+/* écran de fin de l'aventure (ui/ending.js) : la mise en scène du logo, avec le bilan de la partie */
+.end-card { overflow-y: auto; justify-content: safe center; }
+#cine.logo-on .end-card { pointer-events: auto; }
+.end-word .cine-iut { font-size: clamp(22px, 3.6vw, 44px); }
+.end-word .cine-ty { font-size: clamp(52px, 11vw, 150px); }
+.end-kicker { margin: 6px 0 12px; }
+.end-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; width: min(700px, 100%); margin: 20px 0 0; }
+.end-stats div { padding: 10px 8px; border-radius: 14px; background: rgba(10,14,40,.6); border: 2px solid rgba(255,214,90,.5); box-shadow: 0 4px 0 rgba(5,6,15,.55); }
+.end-stats dt { font-weight: 900; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #ffd35c; }
+.end-stats dd { margin: 4px 0 0; font-family: var(--f-display); font-size: clamp(18px, 2.4vw, 26px); color: #fff; font-variant-numeric: tabular-nums; }
+#cine.logo-on .end-kicker { animation: cineRise .7s .2s both; }
+#cine.logo-on .end-stats { animation: cineRise .8s 1.3s both; }
+#cine.logo-on .end-card .cine-tag { animation-delay: 1.6s; }
+#cine.logo-on .end-card .cine-go { animation: cineRise .8s 2s both, cineGlow 2s 2.8s ease-in-out infinite; }
+.end-note { margin: 0 0 8px; padding: 10px 12px; border-radius: 12px; background: #fff4cf; border: 2px solid #ffc233; font-weight: 800; font-size: 13px; color: var(--ink); }
+
 @media (max-width: 640px) {
+  .end-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 14px; }
+  .end-word .ty-back { -webkit-text-stroke-width: 7px; }
   #cine.playing .cine-bar { height: 8vh; }
+  #cine.logo-on .cine-bar { height: 0; }
   .cine-cap { bottom: calc(8vh + 7vh); }
   .cine-skip { top: max(6px, calc((8vh - 34px) / 2)); }
   .ty-back { -webkit-text-stroke-width: 9px; }
@@ -1722,7 +1741,7 @@ function freshState() {
     city: 'reims', site: 'reims', palmes: 0, accreds: 0,
     b: buildings, obj: 0, boost: 0, evt: null, buy: 1,
     rush: 0, coffee: 0, cd: {}, mission: null, chests: 0, gems: 0, shop: {},
-    muted: false, music: true, musicVol: 0.7, sfxVol: 0.8, intro: false, cine: false, tutoStep: 0, pseudo: '',
+    muted: false, music: true, musicVol: 0.7, sfxVol: 0.8, intro: false, cine: false, ended: false, tutoStep: 0, pseudo: '',
     ach: {}, jpo: 0, seen: {},
     deco: {}, cards: {},
     daily: null, weekly: null, hist: [], rec: {},
@@ -1758,7 +1777,7 @@ function sanitize(o) {
   if (!isObj(o)) return f;
   for (const k of ['money', 'run', 'total', 'best', 'bestGain', 'dip', 'promos', 'ects', 'obj', 'boost', 'jpo', 't', 'runStart', 'cityStart',
     'palmes', 'accreds', 'rush', 'coffee', 'chests', 'gems', 'dipDone']) if (isNum(o[k])) f[k] = Math.max(0, o[k]);
-  for (const k of ['muted', 'music', 'intro', 'cine', 'tipsOff', 'autoOn', 'campusDone', 'eco']) if (typeof o[k] === 'boolean') f[k] = o[k];
+  for (const k of ['muted', 'music', 'intro', 'cine', 'ended', 'tipsOff', 'autoOn', 'campusDone', 'eco']) if (typeof o[k] === 'boolean') f[k] = o[k];
   if (typeof o.cine !== 'boolean') f.cine = f.intro; // parties d'avant la cinématique : déjà vue
   if (isNum(o.tutoStep)) f.tutoStep = Math.max(0, Math.floor(o.tutoStep));
   for (const k of ['musicVol', 'sfxVol']) if (isNum(o[k])) f[k] = clamp(o[k], 0.05, 1);
@@ -2452,7 +2471,7 @@ function updateEffects(dt) {
     const p = particles[k];
     p.life -= dt;
     if (p.life <= 0) { particles.splice(k, 1); continue; }
-    p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.dust ? -10 : 260) * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.dust ? -10 : p.g ?? 260) * dt;
   }
   for (let k = floats.length - 1; k >= 0; k--) {
     const f = floats[k];
@@ -2470,6 +2489,14 @@ function updateEffects(dt) {
 function drawWorldEffects() {
   for (const p of particles) {
     ctx.globalAlpha = clamp(p.life / p.max * 1.4, 0, 1);
+    if (p.glow) { // feu d'artifice : halo coloré, cœur lumineux qui s'additionne, sans contour
+      const a = ctx.globalAlpha;
+      ctx.fillStyle = p.color; ctx.globalAlpha = a * 0.3; circle(p.x, p.y, p.r * 2.2);
+      ctx.globalAlpha = a; circle(p.x, p.y, p.r);
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = a * 0.5; circle(p.x, p.y, p.r * 0.6);
+      ctx.globalCompositeOperation = 'source-over';
+      continue;
+    }
     ctx.fillStyle = p.color; circle(p.x, p.y, p.r);
     if (!p.dust) { ctx.strokeStyle = 'rgba(28,37,65,.6)'; ctx.lineWidth = 0.8; ctx.stroke(); }
   }
@@ -2699,7 +2726,7 @@ function moveToNextCity() {
 
 /** Champs conservés par l'accréditation nationale (tout le reste repart de zéro). */
 const KEPT_ON_ACCREDITATION = ['total', 'best', 'bestGain', 'promos', 'ach', 'jpo', 'seen', 'cards', 'gems', 'shop', 'chests',
-  'daily', 'weekly', 'hist', 'rec', 'tips', 'tipsOff', 'muted', 'music', 'intro', 'cine', 'pseudo', 'buy', 'autoOn', 'obj', 'eco', 'musicVol', 'sfxVol'];
+  'daily', 'weekly', 'hist', 'rec', 'tips', 'tipsOff', 'muted', 'music', 'intro', 'cine', 'ended', 'pseudo', 'buy', 'autoOn', 'obj', 'eco', 'musicVol', 'sfxVol'];
 
 /**
  * Accréditation nationale (2ᵉ niveau de prestige) : une fois Charleville labellisée, on repart de Reims
@@ -3066,7 +3093,7 @@ const OBJECTIVES = [
   ['Obtiens le label d’excellence de Châlons et installe-toi à Charleville', () => cityReached(2)],
   ['Construis les 16 bâtiments de Charleville', () => allBuilt('charle')],
   ['Attrape une marionnette la nuit', () => [Math.min(1, count('puppets')), 1]],
-  ['Obtiens l’accréditation nationale', () => [Math.min(state.accreds, 1), 1]],
+  ['Obtiens le label d’excellence de Charleville et termine l’aventure', () => [state.ended || canAccredit() || state.accreds > 0 ? 1 : 0, 1]],
 ];
 
 /** Récompense d'un objectif : 1 min de revenus (au moins 50 €). */
@@ -4353,9 +4380,10 @@ function drawBuilding(d) {
 /* ===== js/render/highlight.js ===== */
 /**
  * Mises en valeur dessinées au sol, pilotées par l'interface :
- * `selected` = bâtiment dont la fiche est ouverte, `focus` = identifiant du bâtiment montré par Plume.
+ * `selected` = bâtiment dont la fiche est ouverte, `focus` = identifiant du bâtiment montré par Plume,
+ * `hover` = bâtiment sous la souris (ceux qui le cachent deviennent transparents).
  */
-const highlight = { selected: null, focus: null };
+const highlight = { selected: null, focus: null, hover: null };
 
 
 /* ===== js/render/scenery.js ===== */
@@ -4712,6 +4740,13 @@ function drawGround() {
     const [i0, j0, w, dd] = focus.plot, p = REDUCED_MOTION ? 0.5 : (Math.sin(world.t * 5) + 1) / 2;
     ctx.beginPath(); diamond(i0 - 0.1, j0 - 0.1, w + 0.2, dd + 0.2);
     ctx.strokeStyle = `rgba(255,194,51,${0.5 + 0.5 * p})`; ctx.lineWidth = 4 + 3 * p; ctx.stroke();
+  }
+  // bâtiment survolé : contour blanc au sol (on voit ce que le clic va ouvrir, même s'il est caché)
+  const hovered = highlight.hover;
+  if (hovered && hovered !== highlight.selected && hovered.site === state.site) {
+    const [i0, j0, w, dd] = hovered.plot;
+    ctx.beginPath(); diamond(i0 + 0.04, j0 + 0.04, w - 0.08, dd - 0.08);
+    ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 3; ctx.stroke();
   }
   // bâtiment sélectionné : pointillés qui défilent
   if (highlight.selected) {
@@ -5420,7 +5455,57 @@ function isoSort(items) {
 }
 
 const plotItem = d => ({ minI: d.plot[0], maxI: d.plot[0] + d.plot[2], minJ: d.plot[1], maxJ: d.plot[1] + d.plot[3] });
-const BUILDING_ITEMS = Object.fromEntries(SITES.map(s => [s.id, SITE_DEFS[s.id].map(d => ({ ...plotItem(d), draw: () => drawBuilding(d) }))]));
+const BUILDING_ITEMS = Object.fromEntries(SITES.map(s => [s.id, SITE_DEFS[s.id].map(d => ({ ...plotItem(d), draw: () => drawSceneBuilding(d) }))]));
+
+/* ----- Vue en transparence : un bâtiment qui en cache un autre (survolé ou sélectionné) s'efface ----- */
+
+/** Effacement maximal d'un bâtiment qui gêne (0 = opaque, 1 = invisible). */
+const GHOST_MAX = 0.72;
+/** Part du bâtiment visé qui doit être recouverte pour que celui de devant s'efface. */
+const GHOST_OVERLAP = 0.12;
+/** Calque hors écran : le bâtiment y est dessiné entier, puis posé en transparence (sans superpositions internes visibles). */
+const ghostLayer = document.createElement('canvas');
+const ghostCtx = ghostLayer.getContext('2d');
+
+/** Rectangle du monde occupé à l'écran par un bâtiment, toit compris. */
+function buildingBox(d) {
+  const [i0, j0, w, dd] = d.plot;
+  return { x0: (i0 - j0 - dd) * HW, x1: (i0 + w - j0) * HW, y0: (i0 + j0) * HH - d.top, y1: (i0 + w + j0 + dd) * HH };
+}
+
+/** `a` est dessiné devant `b` et en recouvre une bonne part (même règle de profondeur que isoSort). */
+function hides(a, b) {
+  if (!(b.plot[0] + b.plot[2] <= a.plot[0] || b.plot[1] + b.plot[3] <= a.plot[1])) return false;
+  const A = buildingBox(a), B = buildingBox(b);
+  const w = Math.min(A.x1, B.x1) - Math.max(A.x0, B.x0), h = Math.min(A.y1, B.y1) - Math.max(A.y0, B.y0);
+  return w > 0 && h > 0 && w * h > GHOST_OVERLAP * (B.x1 - B.x0) * (B.y1 - B.y0);
+}
+
+/** À chaque image : les bâtiments construits qui cachent le bâtiment survolé ou sélectionné s'effacent en douceur. */
+function updateGhosts(dt) {
+  const targets = [highlight.hover, highlight.selected].filter(t => t && t.site === state.site);
+  const k = REDUCED_MOTION ? 1 : 1 - Math.pow(0.0004, dt);
+  for (const d of currentDefs()) {
+    const want = state.b[d.id].lvl > 0 && targets.some(t => t !== d && hides(d, t)) ? 1 : 0;
+    d.ghost = (d.ghost || 0) + (want - (d.ghost || 0)) * k;
+    if (d.ghost < 0.01) d.ghost = 0;
+  }
+}
+
+function drawSceneBuilding(d) {
+  if (!d.ghost) { drawBuilding(d); return; }
+  if (ghostLayer.width !== canvas.width || ghostLayer.height !== canvas.height) { ghostLayer.width = canvas.width; ghostLayer.height = canvas.height; }
+  ghostCtx.setTransform(1, 0, 0, 1, 0, 0);
+  ghostCtx.clearRect(0, 0, ghostLayer.width, ghostLayer.height);
+  ghostCtx.setTransform(ctx.getTransform());
+  ghostCtx.lineJoin = 'round';
+  drawInto(ghostCtx, () => drawBuilding(d));
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1 - GHOST_MAX * d.ghost;
+  ctx.drawImage(ghostLayer, 0, 0);
+  ctx.restore();
+}
 /** Bâtiments du premier plan d'abord, pour le test de clic. */
 const HIT_ORDER = Object.fromEntries(SITES.map(s => [s.id, [...SITE_DEFS[s.id]].sort((a, b) =>
   (b.plot[0] + b.plot[2] + b.plot[1] + b.plot[3]) - (a.plot[0] + a.plot[2] + a.plot[1] + a.plot[3]))]));
@@ -5499,19 +5584,51 @@ function insidePolygon(x, y, poly) {
   return inside;
 }
 
-/** Bâtiment sous un point du monde (flèche ou silhouette), ou null. */
-function buildingAt(wx, wy) {
+/** Silhouette d'un bâtiment à l'écran (coordonnées du monde), toit compris. */
+function outlineOf(d) {
+  const [i0, j0, w, dd] = d.plot, h = d.top;
+  return [iso(i0, j0, h), iso(i0 + w, j0, h), iso(i0 + w, j0, 0), iso(i0 + w, j0 + dd, 0), iso(i0, j0 + dd, 0), iso(i0, j0 + dd, h)];
+}
+
+/** En dessous de cette part visible, un bâtiment est « caché » : sa parcelle au sol devient cliquable à travers ceux de devant. */
+const HIDDEN_BELOW = 0.4;
+
+/** Part visible de la silhouette d'un bâtiment, une fois retirés les bâtiments construits dessinés devant lui (échantillonnage). */
+function visibleShare(b) {
+  const front = currentDefs().filter(a => a !== b && state.b[a.id].lvl > 0
+    && (b.plot[0] + b.plot[2] <= a.plot[0] || b.plot[1] + b.plot[3] <= a.plot[1])).map(outlineOf);
+  if (!front.length) return 1;
+  const own = outlineOf(b), box = buildingBox(b), n = 12;
+  let inside = 0, seen = 0;
+  for (let u = 0.5; u < n; u++) for (let v = 0.5; v < n; v++) {
+    const x = box.x0 + (box.x1 - box.x0) * u / n, y = box.y0 + (box.y1 - box.y0) * v / n;
+    if (!insidePolygon(x, y, own)) continue;
+    inside++;
+    if (!front.some(poly => insidePolygon(x, y, poly))) seen++;
+  }
+  return inside ? seen / inside : 1;
+}
+
+/**
+ * Bâtiments sous un point du monde : [celui que vise le clic, l'autre possible ou null].
+ * Ordre : flèche d'amélioration, puis ce qui est dessiné devant ; mais si le point du sol visé est la parcelle
+ * d'un bâtiment surtout caché par celui de devant, c'est lui qui est visé (celui de devant devient transparent,
+ * voir updateGhosts) et celui de devant devient l'autre choix (un second clic au même endroit le sélectionne).
+ */
+function buildingChoices(wx, wy) {
   for (let k = arrowBubbles.length - 1; k >= 0; k--) {
     const b = arrowBubbles[k];
-    if (Math.hypot(wx - b.x, wy - b.y) < b.r + 3) return BY[b.id];
+    if (Math.hypot(wx - b.x, wy - b.y) < b.r + 3) return [BY[b.id], null];
   }
-  for (const d of HIT_ORDER[state.site]) {
-    const [i0, j0, w, dd] = d.plot, h = d.top;
-    const outline = [iso(i0, j0, h), iso(i0 + w, j0, h), iso(i0 + w, j0, 0), iso(i0 + w, j0 + dd, 0), iso(i0, j0 + dd, 0), iso(i0, j0 + dd, h)];
-    if (insidePolygon(wx, wy, outline)) return d;
-  }
-  return null;
+  const front = HIT_ORDER[state.site].find(d => insidePolygon(wx, wy, outlineOf(d))) || null;
+  const fi = (wy / HH + wx / HW) / 2, fj = (wy / HH - wx / HW) / 2; // point du sol visé (inverse de iso, z = 0)
+  const ground = currentDefs().find(d => { const [i0, j0, w, dd] = d.plot; return fi >= i0 && fi < i0 + w && fj >= j0 && fj < j0 + dd; }) || null;
+  if (!ground || !front || ground === front) return [front || ground, null];
+  return visibleShare(ground) < HIDDEN_BELOW ? [ground, front] : [front, ground];
 }
+
+/** Bâtiment visé sous un point du monde, ou null. */
+const buildingAt = (wx, wy) => buildingChoices(wx, wy)[0];
 
 
 /* ===== js/render/quality.js ===== */
@@ -6256,8 +6373,8 @@ function hitAt(sx, sy) {
   if (visitor) return { type: 'visitor', visitor };
   const tile = screenToTile(sx, sy);
   if (tile && hasGrapes(tile[0], tile[1])) return { type: 'grape', tile };
-  const d = buildingAt(wx, wy);
-  return d ? { type: 'building', d } : null;
+  const [d, alt] = buildingChoices(wx, wy);
+  return d ? { type: 'building', d, alt } : null;
 }
 
 function clickAt(sx, sy) {
@@ -6266,7 +6383,9 @@ function clickAt(sx, sy) {
     if (tile) placeDecoAt(tile[0], tile[1]);
     return;
   }
-  const hit = hitAt(sx, sy);
+  let hit = hitAt(sx, sy);
+  // deux bâtiments l'un derrière l'autre : un second clic au même endroit passe à l'autre (et le tutoriel accepte les deux)
+  if (hit && hit.alt && (hit.d === highlight.selected || !tutorialAllowsClick(hit))) hit = { ...hit, d: hit.alt, alt: hit.d };
   if (!tutorialAllowsClick(hit)) return;
   if (!hit) { if (highlight.selected) closeSheets(); return; }
   if (hit.type === 'visitor') { welcomeVisitor(hit.visitor, iso(hit.visitor.x, hit.visitor.y, 30)); return; }
@@ -6287,8 +6406,9 @@ function clickAt(sx, sy) {
 
 /** Survol sans bouton appuyé : case visée en mode pose, sinon curseur et infobulle. */
 function hover(e, p) {
-  if (placing) { setHoverTile(screenToTile(p.x, p.y)); canvas.classList.add('hot'); return; }
+  if (placing) { highlight.hover = null; setHoverTile(screenToTile(p.x, p.y)); canvas.classList.add('hot'); return; }
   const hit = hitAt(p.x, p.y);
+  highlight.hover = hit && hit.type === 'building' && e.pointerType === 'mouse' ? hit.d : null;
   canvas.classList.toggle('hot', !!hit);
   if (e.pointerType !== 'mouse') return;
   const key = !hit ? null : hit.type === 'visitor' ? 'jpow' : hit.type === 'critter' ? 'c:' + hit.critter.type.n : hit.type === 'grape' ? 'c:Grappe mûre' : 'b:' + hit.d.id;
@@ -6300,6 +6420,7 @@ function onPointerDown(e) {
   try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* navigateur ancien */ }
   const p = localPoint(e);
   pointers.set(e.pointerId, p);
+  highlight.hover = null;
   if (pointers.size === 1) { drag = { x: p.x, y: p.y, cx: camera.x, cy: camera.y }; moved = false; }
   else if (pointers.size === 2) { pinch = { ...pinchInfo(), z: camera.z }; moved = true; }
   stopCameraGlide();
@@ -6342,7 +6463,7 @@ function initPointer() {
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerEnd);
   canvas.addEventListener('pointercancel', onPointerEnd);
-  canvas.addEventListener('pointerleave', () => { if (isPointerTooltip()) hideTooltip(); canvas.classList.remove('hot'); });
+  canvas.addEventListener('pointerleave', () => { if (isPointerTooltip()) hideTooltip(); canvas.classList.remove('hot'); highlight.hover = null; });
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
     const p = localPoint(e);
@@ -6755,7 +6876,8 @@ function buildGraduation() {
        <button class="btn go big" type="button" id="gMove"><span class="l1" id="gMoveL"></span><span class="l2" id="gMoveS"></span></button>`
     : `<h3 class="eyebrow sec">Accréditation nationale</h3>
        <div class="kv palmes"><span>Palmes académiques</span><b id="gPalmes"></b><span>À la prochaine accréditation</span><b id="gPalmesGain"></b></div>
-       <p class="kind">Une fois Charleville labellisée, l’accréditation fait tout recommencer depuis Reims : diplômés, ECTS et conseil pédagogique repartent de zéro, mais chaque palme donne +50 % de revenus et +10 % de diplômés pour toujours. Succès, anciens élèves, pépites et boutique sont conservés.</p>
+       ${state.ended ? '<p class="end-note">Aventure terminée : les trois villes ont leur label d’excellence. Tu peux continuer à jouer ici aussi longtemps que tu veux.</p>' : ''}
+       <p class="kind">Facultatif, pour rejouer : une fois Charleville labellisée, l’accréditation fait tout recommencer depuis Reims. Diplômés, ECTS et conseil pédagogique repartent de zéro, mais chaque palme donne +50 % de revenus et +10 % de diplômés pour toujours. Succès, anciens élèves, pépites et boutique sont conservés.</p>
        <button class="btn coin big" type="button" id="gAcc"><span class="l1" id="gAccL"></span><span class="l2" id="gAccS"></span></button>`;
   gradSheet.innerHTML = `${sheetHeader('Diplômes', ICON.close)}
     <p class="kind" style="margin:0 0 10px">À la cérémonie, l’année repart de zéro <b>dans la ville actuelle</b> (argent, bâtiments, responsables). En échange, chaque diplômé ajoute <b>+2 % à tous les revenus</b> pour toujours, et la promo rapporte des crédits ECTS pour le conseil pédagogique.</p>
@@ -6932,8 +7054,8 @@ const TIPS = [
    text:'Les grappes sont mûres ! Clique sur chacune avant la fin du temps. La Cave de champagne augmente ce que rapporte chaque grappe.'},
   {id:'site2', when:() => isSiteOpen('charle'), title:'Charleville-Mézières !',
    text:'Bienvenue dans la capitale mondiale de la marionnette ! La nuit, les revenus de la ville augmentent de 30 % et des marionnettes se promènent sur le campus : attrape-les.'},
-  {id:'accredit', when:() => canAccredit(), title:'L’accréditation nationale',
-   text:'Les trois villes sont labellisées ! Dans Diplômes, l’accréditation nationale fait tout recommencer depuis Reims, sans diplômés ni ECTS, mais avec des palmes académiques : +50 % de revenus chacune, pour toujours.'},
+  {id:'accredit', when:() => canAccredit() && state.ended, title:'Et maintenant ?',
+   text:'L’aventure est terminée, bravo ! Tes campus continuent de tourner : continue à les faire grandir. Si un jour tu veux rejouer, l’accréditation nationale (dans Diplômes, facultative) fait tout recommencer depuis Reims avec des palmes académiques : +50 % de revenus chacune, pour toujours.'},
 ];
 
 
@@ -7073,6 +7195,7 @@ function paintMusicButton() {
  * Bande-son de la cinématique d'introduction, synthétisée en direct et calée sur ses plans (120 bpm : 1 temps = 0,5 s,
  * 1 mesure = 2 s). Intro en nappes (la mineur), construction en arpèges, thème complet, montée, puis impact en do majeur
  * à l'apparition du logo (SCORE_LOGO_AT) et nappe qui tient pendant l'écran titre.
+ * Le film de fin (ui/ending.js) joue un second morceau sur la même grille : cadence de victoire et feux d'artifice.
  * Les notes sont programmées au fil de l'eau (fenêtre de LOOKAHEAD s), comme la musique du jeu.
  */
 
@@ -7084,13 +7207,10 @@ const POP_START = 7, POP_STEP = 0.25, POP_COUNT = 16;
 // Tout le reste vit dans une fermeture : le build réunit les modules dans une seule portée.
 const cineScore = (() => {
   const BEAT = 0.5, BAR = 4 * BEAT;
-  /** Instants des coupes entre plans (souffle). */
-  const CUTS = [6, 14, 18, 22, 26];
 
   const hz = m => 440 * Math.pow(2, (m - 69) / 12);
   // accords mesure par mesure : la m, fa, do, la m, fa, do, sol, la m, fa, do, sol, la m, fa, sol, sol → do majeur au logo
   const AM = [57, 60, 64], F = [53, 57, 60], C = [48, 52, 55], G = [55, 59, 62];
-  const BARS = [AM, F, C, AM, F, C, G, AM, F, C, G, AM, F, G, G];
   const LEAD = [ // [mesure, temps, note, durée en temps] sur le thème (mesures 7 à 12)
     [7,0,76,1.5],[7,1.5,81,0.5],[7,2,84,1],[7,3,83,1],
     [8,0,81,2],[8,2,79,1],[8,3,77,1],
@@ -7099,6 +7219,20 @@ const cineScore = (() => {
     [11,0,84,1.5],[11,1.5,83,0.5],[11,2,81,1],[11,3,76,1],
     [12,0,77,1],[12,1,81,1],[12,2,84,1],[12,3,89,1],
   ];
+  // fin de l'aventure : do, sol, la m, fa en boucle (cadence de victoire), thème lumineux en do majeur
+  const LEAD_END = [
+    [7,0,77,1],[7,1,81,1],[7,2,84,1.5],[7,3.5,81,0.5],
+    [8,0,79,2],[8,2,76,1],[8,3,79,1],
+    [9,0,79,1.5],[9,1.5,81,0.5],[9,2,83,1],[9,3,86,1],
+    [10,0,84,2],[10,2,83,1],[10,3,81,1],
+    [11,0,81,1],[11,1,84,1],[11,2,89,1],[11,3,88,1],
+    [12,0,84,3],[12,3,79,1],
+  ];
+  /** Morceaux : accords par mesure, mélodie, coupes entre plans (souffle), pops de construction, feux d'artifice. */
+  const pieces = () => ({
+    intro: { bars: [AM, F, C, AM, F, C, G, AM, F, C, G, AM, F, G, G], lead: LEAD, cuts: [6, 14, 18, 22, 26], pops: true, sparks: [] },
+    ending: { bars: [C, G, AM, F, C, G, AM, F, C, G, AM, F, C, G, G], lead: LEAD_END, cuts: [6, 12, 18, 24], pops: false, sparks: END_SPARKS },
+  });
   const POP_NOTES = [72, 74, 76, 79, 81, 84, 86, 88, 91, 93, 96, 98, 100, 103, 105, 108];
 
   const LOOKAHEAD = 0.6;
@@ -7137,9 +7271,10 @@ const cineScore = (() => {
 
   /* ----- Partition ----- */
 
-  function compose() {
+  function compose(name) {
+    const piece = pieces()[name] || pieces().intro;
     const ev = [], at = (t, fn) => ev.push([t, fn]);
-    BARS.forEach((chord, bar) => {
+    piece.bars.forEach((chord, bar) => {
       const t = bar * BAR;
       // nappes : sombres et filtrées au début, plus ouvertes ensuite
       const cutoff = bar < 3 ? 500 + bar * 350 : bar < 7 ? 1500 : 2200;
@@ -7156,7 +7291,7 @@ const cineScore = (() => {
         for (let k = 0; k < 8; k++) at(t + k * BEAT / 2, s => hat(s, k % 2 ? 0.025 : 0.04));
       }
     });
-    for (const [bar, beat, m, len] of LEAD) at(bar * BAR + beat * BEAT, s => {
+    for (const [bar, beat, m, len] of piece.lead) at(bar * BAR + beat * BEAT, s => {
       voice('square', hz(m), s, len * BEAT * 0.95, 0.03, { cutoff: 3200, send: 0.35 });
       voice('triangle', hz(m), s, len * BEAT, 0.05, { send: 0.35 });
     });
@@ -7178,8 +7313,14 @@ const cineScore = (() => {
     [84, 88, 91, 96, 100].forEach((m, k) => at(hit + 0.15 + k * 0.12, s => bell(m, s, 0.05)));
     // nappe de l'écran titre (do, la m, fa, sol), qui s'éteint doucement
     [[48, 52, 55], AM, F, G, [48, 52, 55], AM].forEach((chord, k) => at(hit + 4 + k * BAR, s => pad(chord, s, BAR, 0.014 * (1 - k * 0.12), 1400)));
-    for (const c of CUTS) at(c - 0.4, s => whoosh(s + 0.4));
-    for (let k = 0; k < POP_COUNT; k++) at(POP_START + k * POP_STEP, s => {
+    for (const c of piece.cuts) at(c - 0.4, s => whoosh(s + 0.4));
+    // feux d'artifice : sifflement qui monte, détonation sourde, crépitement
+    for (const t of piece.sparks) {
+      at(t - 0.55, s => voice('sine', 900, s, 0.5, 0.012, { attack: 0.05, slideTo: 2600 }));
+      at(t, s => { voice('sine', 110, s, 0.5, 0.18, { attack: 0.004, slideTo: 40 }); noise(s, 0.25, 0.08, { type: 'lowpass', freq: 900 }); });
+      at(t + 0.12, s => noise(s, 0.9, 0.045, { type: 'bandpass', freq: 4200, q: 0.5 }));
+    }
+    if (piece.pops) for (let k = 0; k < POP_COUNT; k++) at(POP_START + k * POP_STEP, s => {
       voice('sine', hz(POP_NOTES[k]), s, 0.12, 0.09, { attack: 0.003, slideTo: hz(POP_NOTES[k] + 7) });
       voice('triangle', hz(POP_NOTES[k] - 12), s, 0.08, 0.05, { attack: 0.003 });
     });
@@ -7196,7 +7337,7 @@ const cineScore = (() => {
     } catch (e) { /* contexte audio fermé : la cinématique continue sans le son */ }
   }
 
-  function start(from) {
+  function start(from, name = 'intro') {
     stop(0);
     ac = audioCtx();
     if (!ac || !state.music) return false;
@@ -7213,7 +7354,7 @@ const cineScore = (() => {
       const data = noiseBuf.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
     }
-    events = compose();
+    events = compose(name);
     t0 = ac.currentTime + 0.05 - from;
     cursor = events.findIndex(e => e[0] >= from);
     if (cursor < 0) cursor = events.length;
@@ -7239,8 +7380,8 @@ const cineScore = (() => {
   return { start, time, stop };
 })();
 
-/** Lance la bande-son à partir de l'instant `from` (s). Retourne false sans son (contexte bloqué, musique coupée). */
-const startScore = (from = 0) => cineScore.start(from);
+/** Lance la bande-son (`piece` : 'intro' ou 'ending') à partir de l'instant `from` (s). Retourne false sans son (contexte bloqué, musique coupée). */
+const startScore = (from = 0, piece = 'intro') => cineScore.start(from, piece);
 /** Temps écoulé dans la bande-son (s), ou null si elle ne joue pas. */
 const scoreTime = () => cineScore.time();
 /** Coupe la bande-son en fondu (s). */
@@ -7255,6 +7396,9 @@ const stopScore = (fade = 0.8) => cineScore.stop(fade);
  * où tout est construit, puis six plans traversent les trois villes (aube, plein jour, coucher de soleil, nuit)
  * avant le logo. Les plans sont calés sur la bande-son (audio/cine-score.js) : son horloge fait foi quand elle joue.
  * Un écran de départ précède le film : le clic qu'il demande autorise le son dans le navigateur.
+ *
+ * Le moteur joue un « film » : plans, écrans (HTML), décor (état affiché), morceau de la bande-son.
+ * L'introduction est le film par défaut ; le film de fin de l'aventure est dans ui/ending.js.
  */
 
 /**
@@ -7295,15 +7439,25 @@ function showcaseState(real) {
   return s;
 }
 
+/**
+ * Film d'introduction. Un film : plans (liste, ou fonction de l'état réel), html(owl, real), stage(real) = état affiché,
+ * piece = morceau de la bande-son, sparks = feux d'artifice (s), real = garder les niveaux de l'état affiché,
+ * skipToLogo = « Passer » mène à l'écran final au lieu de fermer.
+ */
+const introFilm = () => ({ shots: CINE_SHOTS, html: owl => cineHtml(owl), stage: showcaseState, piece: 'intro', sparks: [], real: false, skipToLogo: false });
+
 /* ----- Interface ----- */
 
 const PLAY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg>';
 const SOUND_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 
-function cineHtml(owl) {
-  return `<div class="cine-grade"></div><div class="cine-flare"></div><div class="cine-vignette"></div>
+/** Calques communs à tous les films : étalonnage, reflet, vignette, bandes noires, légende. */
+const CINE_LAYERS = `<div class="cine-grade"></div><div class="cine-flare"></div><div class="cine-vignette"></div>
   <div class="cine-bar top"></div><div class="cine-bar bottom"></div>
-  <div class="cine-cap" aria-live="polite"><span class="cine-eyebrow"></span><h2 class="cine-title"></h2></div>
+  <div class="cine-cap" aria-live="polite"><span class="cine-eyebrow"></span><h2 class="cine-title"></h2></div>`;
+
+function cineHtml(owl) {
+  return `${CINE_LAYERS}
   <div class="cine-logo" aria-hidden="true">
     <div class="cine-crest">${owl}</div>
     <h1 class="cine-word"><span class="cine-iut">IUT</span><span class="cine-ty"><span class="ty-back">Tycoon</span><span class="ty-front">Tycoon</span></span></h1>
@@ -7339,11 +7493,11 @@ function hideCaption() {
 /* ----- Plans ----- */
 
 function enterShot(index) {
-  const shot = CINE_SHOTS[index];
+  const shot = cine.shots[index];
   cine.shot = index;
   state.site = state.city = shot.site;
   world.night = shot.night; world.season = shot.season; world.weather = 'clair'; world.snow = 0;
-  for (const d of SITE_DEFS[shot.site]) { state.b[d.id].lvl = shot.empty ? 0 : showLevel(d); d.anim = -99; }
+  for (const d of SITE_DEFS[shot.site]) { if (!cine.film.real) state.b[d.id].lvl = shot.empty ? 0 : showLevel(d); d.anim = -99; }
   clearCritters(); clearEffects(); resetWalkers(shot.empty ? 6 : 48); resetBackdropTiles();
   if (shot.puppets) { const puppet = CRITTERS.find(c => c.id === 'puppet'); for (let k = 0; k < 5; k++) spawnCritter(puppet); }
   cine.el.dataset.grade = shot.grade;
@@ -7366,8 +7520,24 @@ function popBuilding(d) {
   floatAt(x, y, d.short, '#ffffff', 0.9);
 }
 
+/** Couleurs des feux d'artifice (lumineuses : elles s'additionnent sur la nuit). */
+const FIREWORK_COLORS = ['#ffd35c', '#ff6a3d', '#ec5496', '#7fd8ff', '#8dff9e', '#c99bff'];
+
+/** Feu d'artifice dans le ciel, quelque part dans le haut de l'image : deux couronnes d'étincelles qui retombent lentement. */
+function fireworkBurst() {
+  const s = 1 / camera.z, x = camera.x + (Math.random() - 0.5) * 0.7 * view.w * s, y = camera.y - (0.14 + Math.random() * 0.24) * view.h * s;
+  const color = pick(FIREWORK_COLORS), n = REDUCED_MOTION ? 8 : 60;
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * Math.PI * 2 + Math.random() * 0.1, ring = k % 3 ? 1 : 0.55, v = 205 * s * ring * (0.9 + Math.random() * 0.2);
+    particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, g: 70 * s, life: 1.3 + Math.random() * 0.6, max: 1.9,
+      color, r: (ring < 1 ? 2.6 : 3.6) * (1 + Math.random() * 0.5) * s, glow: true });
+  }
+}
+
 /** Effets du plan en cours, au fil du temps `t`. */
 function shotEffects(shot, t) {
+  const sparks = cine.film.sparks;
+  while (cine.spark < sparks.length && t >= sparks[cine.spark]) { cine.spark++; fireworkBurst(); }
   if (shot.pops) {
     while (cine.pops < POP_COUNT && cine.pops < cine.popOrder.length && t >= POP_START + cine.pops * POP_STEP) popBuilding(cine.popOrder[cine.pops++]);
     return;
@@ -7385,13 +7555,13 @@ function shotEffects(shot, t) {
     cine.nextFx = t + 99;
     celebrate();
     const [x, y] = iso(N / 2, N / 2, 60);
-    floatAt(x, y, '+1 280 diplômés', '#ffc233', 1.8);
+    floatAt(x, y, shot.gradText || '+1 280 diplômés', '#ffc233', 1.8);
     for (const d of SITE_DEFS.reims.filter(x => x.kind === 'dept')) { const [bx, by] = buildingAnchor(d); burstAt(bx, by, 12); }
   }
 }
 
 function placeCamera(shot, t) {
-  const next = CINE_SHOTS[cine.shot + 1], dur = next ? next.at - shot.at : shot.dur;
+  const next = cine.shots[cine.shot + 1], dur = next ? next.at - shot.at : shot.dur;
   const p = cineEase(clamp((t - shot.at) / dur, 0, 1)), z = fitZoom();
   camera.x = cineLerp(shot.from[0], shot.to[0], p);
   camera.y = cineLerp(shot.from[1], shot.to[1], p);
@@ -7403,7 +7573,7 @@ function placeCamera(shot, t) {
 /** Noir entre les plans, ouverture au début, éclair blanc au logo. */
 function paintFades(t) {
   let black = t < 1.2 ? 1 - t / 1.2 : 0;
-  for (const s of CINE_SHOTS.slice(1, -1)) black = Math.max(black, 1 - Math.abs(t - s.at) / CUT_FADE);
+  for (const s of cine.shots.slice(1, -1)) black = Math.max(black, 1 - Math.abs(t - s.at) / CUT_FADE);
   cine.fade.style.opacity = clamp(black, 0, 1).toFixed(3);
   cine.flash.style.opacity = clamp(t < SCORE_LOGO_AT ? 1 - (SCORE_LOGO_AT - t) / 0.12 : 1 - (t - SCORE_LOGO_AT) / 0.7, 0, 1).toFixed(3);
 }
@@ -7422,8 +7592,20 @@ function playCinematic() {
   cine.playing = true;
   cine.el.classList.add('playing');
   cine.startedAt = performance.now();
-  cine.withScore = startScore(0);
+  cine.withScore = startScore(0, cine.film.piece);
   cine.lastShown = -1;
+}
+
+/** « Passer » d'un film qui se termine par un écran à lire (la fin) : saute juste avant l'écran final. */
+function skipToLogo() {
+  if (!cine || !cine.playing) return;
+  const at = SCORE_LOGO_AT - 0.4;
+  if (cineClock() >= at) return;
+  cine.withScore = startScore(at, cine.film.piece);
+  cine.startedAt = performance.now() - at * 1000;
+  const next = cine.film.sparks.findIndex(s => s >= at);
+  cine.spark = next < 0 ? cine.film.sparks.length : next;
+  hideCaption();
 }
 
 /** À chaque image tant que la cinématique est ouverte (la partie est en pause). */
@@ -7435,16 +7617,16 @@ function updateCinematic(dt) {
   updateEffects(dt);
   if (!cine.playing) { // écran de départ : le premier plan défile doucement derrière
     cine.idle += dt;
-    const shot = CINE_SHOTS[0], p = (Math.sin(cine.idle * 0.15) + 1) / 2;
+    const shot = cine.shots[0], p = (Math.sin(cine.idle * 0.15) + 1) / 2;
     camera.x = cineLerp(shot.from[0], shot.to[0], p * 0.4); camera.y = cineLerp(shot.from[1], shot.to[1], p * 0.4); camera.z = fitZoom() * shot.from[2];
     clampCamera();
     return;
   }
   const t = cineClock();
   let index = 0;
-  while (index + 1 < CINE_SHOTS.length && t >= CINE_SHOTS[index + 1].at) index++;
+  while (index + 1 < cine.shots.length && t >= cine.shots[index + 1].at) index++;
   if (index !== cine.shot) enterShot(index);
-  const shot = CINE_SHOTS[index], next = CINE_SHOTS[index + 1];
+  const shot = cine.shots[index], next = cine.shots[index + 1];
   if (next && !next.logo && t > next.at - 0.55) hideCaption();
   placeCamera(shot, t);
   shotEffects(shot, t);
@@ -7455,34 +7637,38 @@ const cinematicActive = () => !!cine;
 
 /**
  * Ouvre la cinématique. `immediate` : sans écran de départ (le joueur vient de cliquer, le son est déjà autorisé).
- * `onDone` est appelé à la fin, la partie remise en place.
+ * `onDone` est appelé à la fin, la partie remise en place. `film` : l'introduction par défaut (voir introFilm).
  */
-function startCinematic({ immediate = false, onDone = null } = {}) {
+function startCinematic({ immediate = false, onDone = null, film = introFilm() } = {}) {
   if (cine) return;
-  const el = document.createElement('div');
+  const real = state, el = document.createElement('div');
   el.id = 'cine';
-  el.innerHTML = cineHtml(document.querySelector('#mascot .owl')?.innerHTML || '');
+  el.innerHTML = film.html(document.querySelector('#mascot .owl')?.innerHTML || '', real);
   document.body.appendChild(el);
   $('app').classList.add('cine-mode');
   cine = {
-    el, fade: el.querySelector('.cine-fade'), flash: el.querySelector('.cine-flash'), onDone, real: state,
+    el, fade: el.querySelector('.cine-fade'), flash: el.querySelector('.cine-flash'), onDone, real, film,
+    shots: typeof film.shots === 'function' ? film.shots(real) : film.shots,
     saved: { night: world.night, season: world.season, weather: world.weather, snow: world.snow },
-    shot: -1, playing: false, idle: 0, pops: 0, nextFx: 0, withScore: false, startedAt: 0,
+    shot: -1, playing: false, idle: 0, pops: 0, nextFx: 0, spark: 0, withScore: false, startedAt: 0,
   };
+  highlight.hover = null;
+  for (const d of DEFS) d.ghost = 0;
   save();
   lockSave(true);
   holdMusic(true);
-  setState(showcaseState(cine.real));
+  setState(film.stage(real));
   enterShot(0);
   cine.shot = -1; // le premier plan sera « entré » de nouveau au lancement (légende)
-  el.querySelector('#cinePlay').onclick = playCinematic;
-  el.querySelector('#cineSkip').onclick = endCinematic;
+  const play = el.querySelector('#cinePlay');
+  if (play) play.onclick = playCinematic;
+  el.querySelector('#cineSkip').onclick = film.skipToLogo ? skipToLogo : endCinematic;
   el.querySelector('#cineGo').onclick = endCinematic;
   el.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { e.preventDefault(); endCinematic(); }
+    if (e.key === 'Escape') { e.preventDefault(); film.skipToLogo ? skipToLogo() : endCinematic(); }
   });
-  if (immediate) playCinematic();
-  else el.querySelector('#cinePlay').focus();
+  if (immediate || !play) playCinematic();
+  else play.focus();
 }
 
 /** Ferme la cinématique et rend la partie. */
@@ -7505,6 +7691,97 @@ function endCinematic() {
   setTimeout(() => el.remove(), 600);
   setTimeout(() => holdMusic(false), 700);
   if (onDone) onDone();
+}
+
+
+/* ===== js/ui/ending.js ===== */
+/**
+ * Fin de l'aventure : dès que Charleville obtient son label d'excellence (les trois villes terminées), un film de fin
+ * survole les vrais campus du joueur (feu d'artifice, champagne, remise des diplômes), puis l'écran « Aventure terminée »
+ * avec le bilan de la partie. Rien n'est remis à zéro : on continue à jouer ensuite, l'accréditation reste facultative.
+ * Le film utilise le moteur de la cinématique (ui/cinematic.js) et le morceau « ending » de la bande-son.
+ * Il ne se déclenche qu'une fois (state.ended) ; Options → Revoir la fin le rejoue.
+ */
+
+/** Feux d'artifice (s), calés sur la bande-son : à Charleville, au dernier plan, puis derrière l'écran de fin. */
+const END_SPARKS = [0.7, 1.5, 2.2, 2.9, 3.6, 4.3, 5.0, 24.8, 26.0, 27.2, 31.0, 31.8, 32.9, 33.6, 34.8, 35.7, 37.2, 38.4, 40.1, 41.5, 43.4, 45.0];
+/** Délai entre le label de Charleville et le début du film (s) : le temps de voir les confettis. */
+const ENDING_DELAY = 2.6;
+
+/** Plans du film de fin (même grille que l'introduction : la musique éclate à SCORE_LOGO_AT sur l'écran final). */
+function endingShots(real) {
+  return [
+    { at: 0, site: 'charle', night: 0.85, season: 'ete', grade: 'night', from: [-140, 520, 1.3], to: [250, 330, 1.3], puppets: true,
+      cap: ['Charleville-Mézières', 'Le dernier label est à toi'] },
+    { at: 6, site: 'chalons', night: 0.15, season: 'automne', grade: 'dusk', from: [-500, 150, 1.4], to: [-130, 190, 1.4], bubbles: true,
+      cap: ['Châlons-en-Champagne', 'Le champagne coule à flots'] },
+    { at: 12, site: 'reims', night: 0, season: 'ete', grade: 'gold', from: [-330, 330, 1.85], to: [40, 430, 1.85], money: true,
+      cap: ['Reims · Moulin de la Housse', 'Là où tout a commencé'] },
+    { at: 18, site: 'reims', night: 0, season: 'printemps', grade: 'day', from: [0, 430, 1.22], to: [0, 405, 1.38], graduation: true,
+      gradText: `${fmt(real.dipDone + real.dip)} diplômés`, cap: ['Remise des diplômes', 'Des générations formées'] },
+    { at: 24, site: 'reims', night: 0.45, season: 'ete', grade: 'dusk', from: [0, 400, 1.05], to: [0, 390, 0.8],
+      cap: ['Champagne-Ardenne', 'Trois villes. Un rêve accompli.'] },
+    { at: SCORE_LOGO_AT, site: 'reims', night: 0.6, season: 'ete', grade: 'night', from: [0, 380, 0.95], to: [0, 420, 1.15], logo: true, dur: 16 },
+  ];
+}
+
+/** Bilan affiché sur l'écran de fin. */
+function endingStats(real) {
+  const left = SITES.slice(0, -1).reduce((sum, s) => sum + (real.rec['city_' + s.id] || 0), 0);
+  const played = left + Math.max(0, (Date.now() - real.cityStart) / 1000);
+  const unlocked = ACHIEVEMENTS.filter(a => real.ach[a.id]).length;
+  return [
+    ['Temps de jeu', fmtDur(played)],
+    ['Argent gagné', eur(real.total)],
+    ['Diplômés', fmt(real.dipDone + real.dip)],
+    ['Succès', `${unlocked} / ${ACHIEVEMENTS.length}`],
+  ];
+}
+
+function endingHtml(owl, real) {
+  const stats = endingStats(real).map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
+  return `${CINE_LAYERS}
+  <div class="cine-logo end-card" role="dialog" aria-label="Fin de l’aventure">
+    <div class="cine-crest">${owl}</div>
+    <p class="cine-sub end-kicker">Félicitations, directeur !</p>
+    <h1 class="cine-word end-word"><span class="cine-iut">AVENTURE</span><span class="cine-ty"><span class="ty-back">Terminée !</span><span class="ty-front">Terminée !</span></span></h1>
+    <p class="cine-sub">Reims · Châlons-en-Champagne · Charleville-Mézières : trois labels d’excellence</p>
+    <dl class="end-stats">${stats}</dl>
+    <p class="cine-tag">Merci d’avoir joué ! Ton IUT continue de tourner : tu peux continuer à faire grandir tes campus.</p>
+    <button type="button" class="btn go big cine-go" id="cineGo">Continuer à jouer</button>
+  </div>
+  <div class="cine-fade"></div><div class="cine-flash"></div>
+  <button type="button" class="cine-skip" id="cineSkip">Passer <span aria-hidden="true">›</span></button>`;
+}
+
+/** Film de fin : les vrais campus du joueur (copie de la partie), tels qu'il les a construits. */
+const endingFilm = () => ({ shots: endingShots, html: endingHtml, stage: endingStage, piece: 'ending', sparks: END_SPARKS, real: true, skipToLogo: true });
+
+/** Décor du film : une copie de la partie, sans argent (pas de flèches d'amélioration à l'image). */
+const endingStage = real => ({ ...structuredClone(real), money: 0, tipsOff: true });
+
+function playEnding({ replay = false } = {}) {
+  if (cinematicActive()) return;
+  closeModal();
+  closeSheets();
+  hideMascot();
+  state.ended = true;
+  startCinematic({
+    immediate: true, film: endingFilm(),
+    onDone: () => { if (!replay) notify.toast('Mode libre : tes campus continuent de tourner. Bonne continuation, directeur !', 'gold'); },
+  });
+}
+
+let endingTimer = null;
+
+/** Deux fois par seconde : la fin se déclenche une seule fois, quand les trois villes sont labellisées. */
+function checkEnding() {
+  if (state.ended || endingTimer || !canAccredit() || tutorialActive() || cinematicActive()) return;
+  closeSheets();
+  celebrate();
+  playSound('boost');
+  notify.toast('Label d’excellence de Charleville : les trois villes sont terminées !', 'gold');
+  endingTimer = setTimeout(() => { endingTimer = null; playEnding(); }, ENDING_DELAY * 1000);
 }
 
 
@@ -7577,7 +7854,7 @@ function openOptions() {
     <label class="opt"><input type="checkbox" id="oTips" ${state.tipsOff ? '' : 'checked'}> Conseils de Plume</label>
     <label class="opt"><input type="checkbox" id="oEco" ${state.eco ? 'checked' : ''}> Mode économie (appareil lent : image plus légère, 30 images par seconde)</label>
     <p class="small">Morceau en cours : ${musicTitle()} (il change selon le jour, la nuit et la saison).</p>
-    <div class="m-row"><button type="button" class="btn sm" id="oReplay">Revoir les conseils de Plume</button><button type="button" class="btn sm" id="oTuto">Refaire le tutoriel</button><button type="button" class="btn sm" id="oCine">Revoir l’introduction</button></div>
+    <div class="m-row"><button type="button" class="btn sm" id="oReplay">Revoir les conseils de Plume</button><button type="button" class="btn sm" id="oTuto">Refaire le tutoriel</button><button type="button" class="btn sm" id="oCine">Revoir l’introduction</button>${state.ended ? '<button type="button" class="btn sm" id="oEnd">Revoir la fin</button>' : ''}</div>
     <p class="small">Glisse pour te déplacer, molette ou pincement pour zoomer. La partie est sauvegardée automatiquement dans ce navigateur. Saison actuelle : ${SEASON_NAME[world.season].toLowerCase()} (chaque saison dure 20 min).</p>
     <p class="small">Total gagné depuis le début : <b>${eur(state.total)}</b></p>
     <h3 class="eyebrow sec">Sauvegarde</h3>
@@ -7600,6 +7877,7 @@ function openOptions() {
   $('oTips').onchange = e => { state.tipsOff = !e.target.checked; if (state.tipsOff) hideMascot(); save(); };
   $('oEco').onchange = e => { setEcoMode(e.target.checked); save(); };
   $('oCine').onclick = () => { closeModal(); closeSheets(); startCinematic({ immediate: true }); };
+  if ($('oEnd')) $('oEnd').onclick = () => playEnding({ replay: true });
   $('oTuto').onclick = () => { closeModal(); closeSheets(); hideMascot(); startTutorial({ restart: true }); };
   $('oReplay').onclick = () => {
     state.tips = {}; state.tipsOff = false;
@@ -7919,6 +8197,7 @@ function slowUpdate() {
   updateAdvice();
   refreshChallenges();
   setMusicMood(currentMood());
+  checkEnding();
   const key = [state.site, state.city, state.promos, state.accreds].join('|'); // la partie a pu changer (diplômes, ville, import…)
   if (key !== sitesKey) { sitesKey = key; renderSites(); clearCritters(); }
   if (state.music !== musicKey) { musicKey = state.music; paintMusicButton(); }
@@ -7938,6 +8217,7 @@ function frame(now) {
 
   updateWorld(game);
   updateCamera(dt);
+  updateGhosts(dt);
   updateWalkers(dt);
   updateEffects(dt);
   updateEvents(game);
